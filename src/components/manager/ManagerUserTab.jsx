@@ -217,13 +217,16 @@ export default function ManagerUserTab({ profiles = [], assignments = [], setBul
     try {
       if (userForm.id) {
         // 1. Update the Profile
-        // The SQL Trigger we just made handles the 'team_assignments' sync automatically
-        const { error } = await supabase.from('profiles').update({
-          full_name: userForm.full_name || "", // Fixes the "null value" warning
-          system_role: userForm.system_role,
-          status: userForm.status,
-          cohort: userForm.cohort || ""        // Fixes the "null value" warning
-        }).eq('id', userForm.id);
+        // 1. Update existing user using the secure RPC
+        // This bypasses RLS issues and triggers the team_assignments sync
+        const { error } = await supabase.rpc('admin_and_manager_update_user', {
+          p_user_id: userForm.id,
+          p_full_name: userForm.full_name || "",
+          p_role: userForm.system_role,
+          p_status: userForm.status,
+          p_cohort: userForm.cohort || "",
+          p_email: userForm.email // Important for the trigger to find the assignment!
+        });
         
         if (error) throw error;
 
