@@ -42,6 +42,7 @@ export const AuthProvider = ({ children }) => {
       setUser(currentUser);
       
       // 2. If we have a user, we MUST wait for the profile before stopping the loading state
+      console.log("Auth Event:", event, "User:", currentUser?.email);
       if (currentUser) {
         await fetchProfile(currentUser.id);
       } else {
