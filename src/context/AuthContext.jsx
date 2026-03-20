@@ -37,6 +37,9 @@ export const AuthProvider = ({ children }) => {
     // Single source of truth for Auth state
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       const currentUser = session?.user ?? null;
+      console.log("--- AUTH DEBUG ---");
+      console.log("Event:", event);
+      console.log("User Email:", currentUser?.email);
       
       // 1. Update the base Auth User
       setUser(currentUser);
@@ -45,6 +48,7 @@ export const AuthProvider = ({ children }) => {
       console.log("Auth Event:", event, "User:", currentUser?.email);
       if (currentUser) {
         await fetchProfile(currentUser.id);
+        console.log("Profile after fetch:", profile);
       } else {
         setProfile(null);
         setAuthError(null);

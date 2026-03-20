@@ -108,7 +108,7 @@ const AuthenticatedApp = () => {
       
       {/* --- FALLBACKS --- */}
       {/* If the user is definitely NOT authenticated, send them to login */}
-      {!isAuthenticated && <Route path="*" element={<Navigate to="/login" replace />} />}
+      {/* {!isAuthenticated && <Route path="*" element={<Navigate to="/login" replace />} />} */}
       
       {/* If they ARE authenticated but the path doesn't exist, show 404 */}
       {isAuthenticated && <Route path="*" element={<PageNotFound />} />}
