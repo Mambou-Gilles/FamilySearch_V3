@@ -5,6 +5,6 @@ const supabasePublishableKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY
 
 
 console.log("SUPABASE URL:", supabaseUrl)
-console.log("SUPABASE KEY EXISTS:", !!supabaseKey)
+console.log("SUPABASE KEY EXISTS:", !!supabasePublishableKey)
 
 export const supabase = createClient(supabaseUrl, supabasePublishableKey)
