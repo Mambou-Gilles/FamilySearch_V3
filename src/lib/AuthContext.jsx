@@ -65,7 +65,7 @@ export const AuthProvider = ({ children }) => {
       userProfile: profile, 
       isLoadingAuth, 
       isLoadingPublicSettings,
-      isAuthenticated: !!user && !!profile, 
+      isAuthenticated: !!user, 
       authError 
     }}>
       {children} 

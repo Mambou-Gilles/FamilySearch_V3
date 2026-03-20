@@ -5,6 +5,11 @@ const ProtectedRoute = ({ children, allowedRoles = [] }) => {
   const { user, userProfile, isLoadingAuth } = useAuth();
   const location = useLocation();
 
+  console.log("--- PROTECTED ROUTE CHECK ---");
+  console.log("Loading:", isLoadingAuth);
+  console.log("User:", user?.email);
+  console.log("Profile Found:", !!userProfile);
+
   // 1. Still loading the session or profile? 
   // This prevents the "flash of login" on refresh.
   if (isLoadingAuth) {
@@ -18,6 +23,7 @@ const ProtectedRoute = ({ children, allowedRoles = [] }) => {
   // 2. Not logged in at all? 
   // Redirect to login but remember where they were trying to go.
   if (!user) {
+    console.log("REDIRECTING: No User Found");
     return <Navigate to="/login" state={{ from: location }} replace />;
   }
 
