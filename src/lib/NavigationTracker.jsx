@@ -8,31 +8,37 @@ export default function NavigationTracker() {
   const { user, isLoadingAuth } = useAuth(); 
 
   useEffect(() => {
-    // Wait until the Auth check is finished
+    // 1. Guard: Wait until Auth is initialized
     if (isLoadingAuth) return;
 
+    // 2. Guard: If no user is logged in, don't even try to log.
+    // This prevents 401/403 errors on the Login page.
+    if (!user) return;
+
     async function logNavigation() {
-      const pathname = location.pathname;
-      let pageName = pathname === '/' ? 'Home' : pathname.replace(/^\//, '');
+      try {
+        const pathname = location.pathname;
+        let pageName = pathname === '/' ? 'Home' : pathname.replace(/^\//, '');
 
-      // Identify the user: use email if logged in, otherwise 'anonymous'
-      const userIdentifier = user?.email || 'anonymous_visitor';
-
-      const { error } = await supabase.from('app_logs').insert([
-        { 
-          user_email: userIdentifier, 
-          page_name: pageName, 
-          action: 'view_page',
-          metadata: { 
-            full_path: location.pathname + location.search,
-            is_authenticated: !!user 
+        const { error } = await supabase.from('app_logs').insert([
+          { 
+            user_email: user.email, 
+            page_name: pageName, 
+            action: 'view_page',
+            metadata: { 
+              full_path: location.pathname + location.search,
+              is_authenticated: true 
+            }
           }
-        }
-      ]);
+        ]);
 
-      if (error) {
-        // Silently log the error to console for your eyes only
-        console.warn("Analytics blocked by RLS:", error.message);
+        if (error) {
+          // This catches Supabase-specific errors (like RLS)
+          console.warn("Navigation log skipped (Supabase):", error.message);
+        }
+      } catch (err) {
+        // This catches network crashes or code errors
+        console.error("Critical Navigation Log Error:", err.message);
       }
     }
 
@@ -41,7 +47,6 @@ export default function NavigationTracker() {
 
   return null;
 }
-
 
 
 
