@@ -12,13 +12,14 @@ export const AuthProvider = ({ children }) => {
   const [authError, setAuthError] = useState(null);
 
   const fetchProfile = useCallback(async (userId) => {
+    console.log('FETCHING PROFILE FOR:', userId);
     try {
       const { data, error } = await supabase
         .from('profiles')
         .select('*')
         .eq('id', userId)
         .maybeSingle();
-
+      console.log('PROFILE RESULT:', data, error);
       if (error) throw error;
 
       if (!data) {
@@ -46,6 +47,7 @@ export const AuthProvider = ({ children }) => {
         setIsLoadingPublicSettings(false);
 
         const { data, error } = await supabase.auth.getSession();
+        console.log('INITIAL SESSION:', data.session);
         if (error) throw error;
 
         const currentUser = data.session?.user ?? null;
@@ -80,6 +82,7 @@ export const AuthProvider = ({ children }) => {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(async (_event, session) => {
       const currentUser = session?.user ?? null;
+      console.log('AUTH EVENT:', _event, session);
 
       if (!mounted) return;
 

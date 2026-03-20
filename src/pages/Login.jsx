@@ -25,19 +25,30 @@ const Login = () => {
     setErrorMsg('');
     setMessage('');
 
-    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
 
-    if (error) {
-      setErrorMsg(error.message);
+      console.log('LOGIN RESULT:', { data, error });
+
+      if (error) {
+        setErrorMsg(error.message);
+        return;
+      }
+
+      if (data?.session) {
+        navigate('/', { replace: true });
+      } else {
+        setErrorMsg('Login succeeded but no session was returned.');
+      }
+    } catch (err) {
+      console.error('Login failed:', err);
+      setErrorMsg(err?.message || 'Unexpected login error.');
+    } finally {
       setLoading(false);
-      return;
     }
-
-    if (data?.session) {
-      navigate('/', { replace: true });
-    }
-
-    setLoading(false);
   };
 
   const handleForgotPassword = async () => {
@@ -50,17 +61,22 @@ const Login = () => {
     setErrorMsg('');
     setMessage('');
 
-    const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${window.location.origin}/reset-password`,
-    });
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: `${window.location.origin}/reset-password`,
+      });
 
-    if (error) {
-      setErrorMsg(error.message);
-    } else {
-      setMessage('Check your email for the password reset link!');
+      if (error) {
+        setErrorMsg(error.message);
+      } else {
+        setMessage('Check your email for the password reset link!');
+      }
+    } catch (err) {
+      console.error('Forgot password failed:', err);
+      setErrorMsg(err?.message || 'Unexpected error.');
+    } finally {
+      setLoading(false);
     }
-
-    setLoading(false);
   };
 
   return (
