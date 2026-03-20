@@ -1,7 +1,7 @@
-import { useState } from 'react';
-import { supabase } from '@/api/supabaseClient'; // Fixed path
+import { useState, useEffect } from 'react';
+import { supabase } from '@/api/supabaseClient';
 import { useNavigate } from 'react-router-dom';
-import { createPageUrl } from "@/utils";
+import { useAuth } from '@/lib/AuthContext';
 
 const Login = () => {
   const [email, setEmail] = useState('');
@@ -9,7 +9,15 @@ const Login = () => {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
+
   const navigate = useNavigate();
+  const { isAuthenticated } = useAuth();
+
+  useEffect(() => {
+    if (isAuthenticated) {
+      navigate('/', { replace: true });
+    }
+  }, [isAuthenticated, navigate]);
 
   const handleLogin = async (e) => {
     e.preventDefault();
@@ -17,16 +25,19 @@ const Login = () => {
     setErrorMsg('');
     setMessage('');
 
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-    
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+
     if (error) {
       setErrorMsg(error.message);
       setLoading(false);
-    } else {
-      // SUCCESS: Navigate to Home. Let Home.jsx decide which dashboard to show based on role.
-      // This is much safer than hardcoding '/admin'.
-      navigate('/'); 
+      return;
     }
+
+    if (data?.session) {
+      navigate('/', { replace: true });
+    }
+
+    setLoading(false);
   };
 
   const handleForgotPassword = async () => {
@@ -34,7 +45,7 @@ const Login = () => {
       setErrorMsg('Please enter your email address first.');
       return;
     }
-    
+
     setLoading(true);
     setErrorMsg('');
     setMessage('');
@@ -48,6 +59,7 @@ const Login = () => {
     } else {
       setMessage('Check your email for the password reset link!');
     }
+
     setLoading(false);
   };
 
@@ -74,30 +86,30 @@ const Login = () => {
 
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">Email Address</label>
-            <input 
-              type="email" 
-              placeholder="name@company.com" 
+            <input
+              type="email"
+              placeholder="name@company.com"
               className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
               value={email}
-              onChange={(e) => setEmail(e.target.value)} 
-              required 
+              onChange={(e) => setEmail(e.target.value)}
+              required
             />
           </div>
 
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">Password</label>
-            <input 
-              type="password" 
-              placeholder="••••••••" 
+            <input
+              type="password"
+              placeholder="••••••••"
               className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
               value={password}
-              onChange={(e) => setPassword(e.target.value)} 
-              required 
+              onChange={(e) => setPassword(e.target.value)}
+              required
             />
           </div>
 
-          <button 
-            type="submit" 
+          <button
+            type="submit"
             disabled={loading}
             className="w-full py-3 px-4 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl transition-all shadow-lg disabled:opacity-50"
           >
@@ -106,8 +118,8 @@ const Login = () => {
         </form>
 
         <div className="mt-6 text-center">
-          <button 
-            type="button" 
+          <button
+            type="button"
             onClick={handleForgotPassword}
             className="text-sm text-indigo-600 hover:text-indigo-500 font-medium"
           >

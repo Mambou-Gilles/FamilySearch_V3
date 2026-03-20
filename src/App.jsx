@@ -9,7 +9,7 @@ import { AuthProvider, useAuth } from '@/lib/AuthContext';
 import UserNotRegisteredError from '@/components/UserNotRegisteredError';
 import ResetPassword from './pages/ResetPassword';
 import UserDeactivatedError from '@/components/UserDeactivatedError';
-import ProtectedRoute from './components/ProtectedRoute'; // Ensure this path is correct
+import ProtectedRoute from './components/ProtectedRoute';
 
 const { Pages, Layout, mainPage } = pagesConfig;
 
@@ -23,21 +23,18 @@ const formatPath = (name) => {
 const mainPageKey = mainPage ?? Object.keys(Pages)[0];
 const MainPage = Pages[mainPageKey] || (() => <></>);
 
-const LayoutWrapper = ({ children, currentPageName }) => Layout ? 
-  <Layout currentPageName={currentPageName}>{children}</Layout> 
-  : <>{children}</>;
+const LayoutWrapper = ({ children, currentPageName }) =>
+  Layout ? <Layout currentPageName={currentPageName}>{children}</Layout> : <>{children}</>;
 
 const AuthenticatedApp = () => {
-  const { 
-    isLoadingAuth, 
-    isLoadingPublicSettings, 
-    authError, 
+  const {
+    isLoadingAuth,
+    isLoadingPublicSettings,
+    authError,
     isAuthenticated,
-    userProfile 
+    userProfile,
   } = useAuth();
 
-  // 1. GLOBAL LOADING STATE
-  // Prevents the "Flash of Login" during a page refresh
   if (isLoadingPublicSettings || isLoadingAuth) {
     return (
       <div className="fixed inset-0 flex items-center justify-center bg-slate-50">
@@ -46,46 +43,52 @@ const AuthenticatedApp = () => {
     );
   }
 
-  // 2. REGISTRATION ERROR (Auth exists, but no Profile)
   if (authError?.type === 'user_not_registered') {
     return <UserNotRegisteredError />;
   }
 
-  // 3. DEACTIVATED GUARD
   if (isAuthenticated && userProfile?.status === 'inactive') {
     return <UserDeactivatedError />;
   }
 
   return (
     <Routes>
-      {/* --- PUBLIC ROUTES --- */}
-      <Route path="/login" element={
-        Pages.Login ? (
-          <LayoutWrapper currentPageName="Login">
-            <Pages.Login />
+      <Route
+        path="/login"
+        element={
+          isAuthenticated ? (
+            <Navigate to="/" replace />
+          ) : Pages.Login ? (
+            <LayoutWrapper currentPageName="Login">
+              <Pages.Login />
+            </LayoutWrapper>
+          ) : (
+            <div className="p-10 text-red-500 font-mono">Error: Login component missing</div>
+          )
+        }
+      />
+
+      <Route
+        path="/reset-password"
+        element={
+          <LayoutWrapper currentPageName="Reset Password">
+            <ResetPassword />
           </LayoutWrapper>
-        ) : (
-          <div className="p-10 text-red-500 font-mono">Error: Login component missing</div>
-        )
-      } />
-      
-      <Route path="/reset-password" element={
-        <LayoutWrapper currentPageName="Reset Password">
-          <ResetPassword />
-        </LayoutWrapper>
-      } />
-      
+        }
+      />
+
       <Route path="/Login" element={<Navigate to="/login" replace />} />
 
-      {/* --- PROTECTED ROUTES --- */}
-      {/* Wrap everything in ProtectedRoute so the session is verified before rendering */}
-      <Route path="/" element={
-        <ProtectedRoute>
-          <LayoutWrapper currentPageName={mainPageKey}>
-            <MainPage />
-          </LayoutWrapper>
-        </ProtectedRoute>
-      } />
+      <Route
+        path="/"
+        element={
+          <ProtectedRoute>
+            <LayoutWrapper currentPageName={mainPageKey}>
+              <MainPage />
+            </LayoutWrapper>
+          </ProtectedRoute>
+        }
+      />
 
       {Object.entries(Pages).map(([name, PageComponent]) => {
         if (!PageComponent || name === 'Login') return null;
@@ -105,18 +108,9 @@ const AuthenticatedApp = () => {
           />
         );
       })}
-      
-      {/* --- FALLBACKS --- */}
-      {/* If the user is definitely NOT authenticated, send them to login */}
-      {/* 1. If we are NOT loading and NOT authenticated, then and ONLY THEN redirect */}
-      {!isLoadingAuth && !isAuthenticated && (
-        <Route path="*" element={<Navigate to="/login" replace />} />
-      )}
-      
-      {/* 2. If we ARE authenticated but the page doesn't exist, show 404 */}
-      {isAuthenticated && (
-        <Route path="*" element={<PageNotFound />} />
-      )}
+
+      {!isAuthenticated && <Route path="*" element={<Navigate to="/login" replace />} />}
+      {isAuthenticated && <Route path="*" element={<PageNotFound />} />}
     </Routes>
   );
 };
