@@ -134,32 +134,35 @@ export default function AdminUsersTab({ profiles, onRefresh }) {
   };
 
   // --- EXISTING LOGIC ---
-
+  
   async function syncToAuth() {
-    const toSync = profiles.filter(p => selected.has(p.id) && !p.synced);
-    
-    if (!toSync.length) { 
-      toast.info("All selected users are already synced"); 
-      return; 
-    }
+  const toSync = profiles.filter(p => selected.has(p.id) && !p.synced);
 
-    setSyncing(true);
-    let successCount = 0;
-    let failCount = 0;
+  if (!toSync.length) {
+    toast.info("All selected users are already synced");
+    return;
+  }
+
+  setSyncing(true);
+  let successCount = 0;
+  let failCount = 0;
+
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.access_token) {
+      toast.error("Your session has expired. Please log in again.");
+      return;
+    }
 
     for (const p of toSync) {
       try {
-        const { data, error } = await supabase.functions.invoke('invite-user', {
-          body: { 
-            email: p.email, 
-            profileId: p.id,      // Matching 'profileId' from our Edge Function
-            fullName: p.full_name, // Pass the name for the Auth metadata
-            role: p.system_role   // Crucial: This sets Lead, Client, or Manager
+        const { error } = await supabase.functions.invoke("invite-user", {
+          body: {
+            email: p.email,
+            profileId: p.id,
+            fullName: p.full_name,
+            role: p.system_role,
           },
-          headers: {
-            // The secret handshake that bypasses the 401
-            'x-service-key': import.meta.env.VITE_SUPABASE_SERVICE_ROLE_KEY
-          }
         });
 
         if (error) throw error;
@@ -172,11 +175,56 @@ export default function AdminUsersTab({ profiles, onRefresh }) {
 
     if (successCount > 0) toast.success(`Sent ${successCount} invitation(s)`);
     if (failCount > 0) toast.error(`Failed to invite ${failCount} user(s)`);
-    
+  } finally {
     setSyncing(false);
     setSelected(new Set());
     if (onRefresh) onRefresh();
   }
+}
+
+
+  // async function syncToAuth() {
+  //   const toSync = profiles.filter(p => selected.has(p.id) && !p.synced);
+    
+  //   if (!toSync.length) { 
+  //     toast.info("All selected users are already synced"); 
+  //     return; 
+  //   }
+
+  //   setSyncing(true);
+  //   let successCount = 0;
+  //   let failCount = 0;
+
+  //   for (const p of toSync) {
+  //     try {
+  //       const { data, error } = await supabase.functions.invoke('invite-user', {
+  //         body: { 
+  //           email: p.email, 
+  //           profileId: p.id,      // Matching 'profileId' from our Edge Function
+  //           fullName: p.full_name, // Pass the name for the Auth metadata
+  //           role: p.system_role   // Crucial: This sets Lead, Client, or Manager
+  //         },
+  //         headers: {
+  //           // The secret handshake that bypasses the 401
+  //           'x-service-key': import.meta.env.VITE_SUPABASE_SERVICE_ROLE_KEY
+  //         }
+  //       });
+
+  //       if (error) throw error;
+  //       successCount++;
+  //     } catch (err) {
+  //       console.error(`Sync error for ${p.email}:`, err);
+  //       failCount++;
+  //     }
+  //   }
+
+  //   if (successCount > 0) toast.success(`Sent ${successCount} invitation(s)`);
+  //   if (failCount > 0) toast.error(`Failed to invite ${failCount} user(s)`);
+    
+  //   setSyncing(false);
+  //   setSelected(new Set());
+  //   if (onRefresh) onRefresh();
+  // }
 
   async function refreshSyncStatuses() {
     const syncedUsers = profiles.filter(p => p.synced);

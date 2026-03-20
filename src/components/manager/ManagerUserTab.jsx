@@ -90,52 +90,93 @@ export default function ManagerUserTab({ profiles = [], assignments = [], setBul
   });
 
   async function handleSyncSelected() {
-    const toSync = filtered.filter(p => selectedIds.has(p.id) && !p.synced);
-    if (!toSync.length) return;
+  const toSync = filtered.filter(p => selectedIds.has(p.id) && !p.synced);
+  if (!toSync.length) return;
 
-    setSyncing(true);
-    try {
-      // 1. Get the session once before starting the loop
-      const { data: { session } } = await supabase.auth.getSession();
-      const token = session?.access_token;
+  setSyncing(true);
 
-      if (!token) {
-        toast.error("Your session has expired. Please log in again.");
-        return;
-      }
-
-      // 2. Loop through users and call the Edge Function
-      for (const user of toSync) {
-        console.log("Checking Key:", import.meta.env.VITE_SUPABASE_SERVICE_ROLE_KEY ? "Key Exists" : "Key is MISSING");
-        const { data, error } = await supabase.functions.invoke('invite-user', {
-          body: { 
-            email: user.email, 
-            profileId: user.id,
-            fullName: user.full_name,
-            role: user.system_role
-          },
-          headers: {
-            'x-service-key': import.meta.env.VITE_SUPABASE_SERVICE_ROLE_KEY.trim()
-          }
-        });
-
-        if (error) {
-          console.error(`Sync failed for ${user.email}:`, error);
-          toast.error(`Failed to sync ${user.email}`);
-          continue; // Keep going with the next user even if one fails
-        }
-      }
-
-      toast.success("Sync process completed.");
-      onRefreshProfiles();
-      setSelectedIds(new Set());
-    } catch (err) {
-      console.error("Sync Error:", err);
-      toast.error("An unexpected error occurred during sync.");
-    } finally {
-      setSyncing(false);
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.access_token) {
+      toast.error("Your session has expired. Please log in again.");
+      return;
     }
+
+    for (const user of toSync) {
+      const { error } = await supabase.functions.invoke("invite-user", {
+        body: {
+          email: user.email,
+          profileId: user.id,
+          fullName: user.full_name,
+          role: user.system_role,
+        },
+      });
+
+      if (error) {
+        console.error(`Sync failed for ${user.email}:`, error);
+        toast.error(`Failed to sync ${user.email}`);
+        continue;
+      }
+    }
+
+    toast.success("Sync process completed.");
+    onRefreshProfiles();
+    setSelectedIds(new Set());
+  } catch (err) {
+    console.error("Sync Error:", err);
+    toast.error("An unexpected error occurred during sync.");
+  } finally {
+    setSyncing(false);
   }
+}
+
+  // async function handleSyncSelected() {
+  //   const toSync = filtered.filter(p => selectedIds.has(p.id) && !p.synced);
+  //   if (!toSync.length) return;
+
+  //   setSyncing(true);
+  //   try {
+  //     // 1. Get the session once before starting the loop
+  //     const { data: { session } } = await supabase.auth.getSession();
+  //     const token = session?.access_token;
+
+  //     if (!token) {
+  //       toast.error("Your session has expired. Please log in again.");
+  //       return;
+  //     }
+
+  //     // 2. Loop through users and call the Edge Function
+  //     for (const user of toSync) {
+  //       console.log("Checking Key:", import.meta.env.VITE_SUPABASE_SERVICE_ROLE_KEY ? "Key Exists" : "Key is MISSING");
+  //       const { data, error } = await supabase.functions.invoke('invite-user', {
+  //         body: { 
+  //           email: user.email, 
+  //           profileId: user.id,
+  //           fullName: user.full_name,
+  //           role: user.system_role
+  //         },
+  //         headers: {
+  //           'x-service-key': import.meta.env.VITE_SUPABASE_SERVICE_ROLE_KEY.trim()
+  //         }
+  //       });
+
+  //       if (error) {
+  //         console.error(`Sync failed for ${user.email}:`, error);
+  //         toast.error(`Failed to sync ${user.email}`);
+  //         continue; // Keep going with the next user even if one fails
+  //       }
+  //     }
+
+  //     toast.success("Sync process completed.");
+  //     onRefreshProfiles();
+  //     setSelectedIds(new Set());
+  //   } catch (err) {
+  //     console.error("Sync Error:", err);
+  //     toast.error("An unexpected error occurred during sync.");
+  //   } finally {
+  //     setSyncing(false);
+  //   }
+  // }
 
   // Function to refresh everyone's last_login from Auth
   async function handleRefreshStatuses() {
