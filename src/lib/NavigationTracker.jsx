@@ -1,43 +1,43 @@
 import { useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
 import { supabase } from '@/api/supabaseClient';
-import { useAuth } from '@/lib/AuthContext'; // Import your Auth hook
+import { useAuth } from '@/lib/AuthContext'; 
 
 export default function NavigationTracker() {
   const location = useLocation();
-  const { user, isLoadingAuth } = useAuth(); // Get user from Context
+  const { user, isLoadingAuth } = useAuth(); 
 
   useEffect(() => {
-    // 1. Guard: Don't do anything if we are still checking auth 
-    // or if no user is logged in.
-    if (isLoadingAuth || !user) return;
+    // Wait until the Auth check is finished
+    if (isLoadingAuth) return;
 
     async function logNavigation() {
-      // 2. Determine the page name from the URL
       const pathname = location.pathname;
       let pageName = pathname === '/' ? 'Home' : pathname.replace(/^\//, '');
 
-      // 3. Log to Supabase
+      // Identify the user: use email if logged in, otherwise 'anonymous'
+      const userIdentifier = user?.email || 'anonymous_visitor';
+
       const { error } = await supabase.from('app_logs').insert([
         { 
-          user_email: user.email, 
+          user_email: userIdentifier, 
           page_name: pageName, 
           action: 'view_page',
           metadata: { 
             full_path: location.pathname + location.search,
-            timestamp: new Date().toISOString()
+            is_authenticated: !!user 
           }
         }
       ]);
 
       if (error) {
-        // Log locally for debugging but don't crash the app
-        console.warn("Navigation log skipped:", error.message);
+        // Silently log the error to console for your eyes only
+        console.warn("Analytics blocked by RLS:", error.message);
       }
     }
 
     logNavigation();
-  }, [location, user, isLoadingAuth]); // Fires when location OR user changes
+  }, [location.pathname, user, isLoadingAuth]); 
 
   return null;
 }
