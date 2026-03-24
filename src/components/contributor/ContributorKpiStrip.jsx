@@ -14,7 +14,7 @@ export default function ContributorKpiStrip({ queue, corrections, completedToday
   const kpis = [
     { val: queue.length, label: "In Queue", color: "text-indigo-600" },
     { val: corrections.length, label: "Corrections", color: "text-red-500" },
-    { val: completedToday, label: "Reviewed Today", color: "text-green-600" },
+    { val: completedToday, label: "Completed Today", color: "text-green-600" },
     { val: `${accuracy}%`, label: "Avg Score", color: "text-amber-600" },
     { val: `${correctionRate}%`, label: "Correction Rate", color: correctionRate > 15 ? "text-red-600" : "text-emerald-600" },
   ];

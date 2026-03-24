@@ -3,13 +3,14 @@ import { QueryClientProvider } from '@tanstack/react-query';
 import { queryClientInstance } from '@/lib/query-client';
 import NavigationTracker from '@/lib/NavigationTracker';
 import { pagesConfig } from './pages.config';
-import { BrowserRouter as Router, Route, Routes, Navigate } from 'react-router-dom';
+import { BrowserRouter as Router, Route, Routes, Navigate, useLocation } from 'react-router-dom';
 import PageNotFound from './lib/PageNotFound';
 import { AuthProvider, useAuth } from '@/lib/AuthContext';
 import UserNotRegisteredError from '@/components/UserNotRegisteredError';
 import ResetPassword from './pages/ResetPassword';
 import UserDeactivatedError from '@/components/UserDeactivatedError';
 import ProtectedRoute from './components/ProtectedRoute';
+
 
 const { Pages, Layout, mainPage } = pagesConfig;
 
@@ -23,26 +24,36 @@ const formatPath = (name) => {
 const mainPageKey = mainPage ?? Object.keys(Pages)[0];
 const MainPage = Pages[mainPageKey] || (() => <></>);
 
-const LayoutWrapper = ({ children, currentPageName }) =>
-  Layout ? <Layout currentPageName={currentPageName}>{children}</Layout> : <>{children}</>;
+const LayoutWrapper = ({ children, currentPageName }) => {
+  if (!Layout) return <>{children}</>;
+  return <Layout currentPageName={currentPageName}>{children}</Layout>;
+};
 
-const AuthenticatedApp = () => {
-  const {
-    isLoadingAuth,
-    isLoadingPublicSettings,
-    authError,
-    isAuthenticated,
-    userProfile,
+const AppRoutes = () => {
+  const { 
+    isLoadingAuth, 
+    authError, 
+    isAuthenticated, 
+    userProfile 
   } = useAuth();
+  
+  const location = useLocation();
 
-  if (isLoadingPublicSettings || isLoadingAuth) {
+  // 1. CRITICAL: Do not render ANY routes until the initial auth check is done.
+  // If you don't do this, the 'Navigate' logic below will trigger 
+  // with partial data, causing a redirect loop.
+  if (isLoadingAuth) {
     return (
       <div className="fixed inset-0 flex items-center justify-center bg-slate-50">
-        <div className="w-10 h-10 border-4 border-slate-200 border-t-indigo-600 rounded-full animate-spin"></div>
+        <div className="flex flex-col items-center gap-4">
+          <div className="w-10 h-10 border-4 border-slate-200 border-t-indigo-600 rounded-full animate-spin"></div>
+          <p className="text-slate-500 font-medium animate-pulse">Authenticating...</p>
+        </div>
       </div>
     );
   }
 
+  // 2. Handle specific blocked states
   if (authError?.type === 'user_not_registered') {
     return <UserNotRegisteredError />;
   }
@@ -51,52 +62,56 @@ const AuthenticatedApp = () => {
     return <UserDeactivatedError />;
   }
 
+
   return (
     <Routes>
-      <Route
-        path="/login"
+      {/* --- PUBLIC ROUTES --- */}
+      <Route 
+        path="/login" 
         element={
           isAuthenticated ? (
-            <Navigate to="/" replace />
-          ) : Pages.Login ? (
-            <LayoutWrapper currentPageName="Login">
-              <Pages.Login />
-            </LayoutWrapper>
+            <Navigate to={`/${formatPath(mainPageKey)}`} replace />
           ) : (
-            <div className="p-10 text-red-500 font-mono">Error: Login component missing</div>
+            <LayoutWrapper currentPageName="Login">
+              {Pages.Login ? <Pages.Login /> : (
+                <div className="p-10 text-red-500 font-mono">
+                  Error: Login component missing
+                </div>
+              )}
+            </LayoutWrapper>
           )
-        }
+        } 
       />
-
-      <Route
-        path="/reset-password"
+      
+      <Route 
+        path="/reset-password" 
         element={
           <LayoutWrapper currentPageName="Reset Password">
             <ResetPassword />
           </LayoutWrapper>
-        }
+        } 
       />
-
+      
       <Route path="/Login" element={<Navigate to="/login" replace />} />
 
-      <Route
-        path="/"
+      {/* --- PROTECTED ROUTES --- */}
+      <Route 
+        path="/" 
         element={
           <ProtectedRoute>
             <LayoutWrapper currentPageName={mainPageKey}>
               <MainPage />
             </LayoutWrapper>
           </ProtectedRoute>
-        }
+        } 
       />
 
       {Object.entries(Pages).map(([name, PageComponent]) => {
         if (!PageComponent || name === 'Login') return null;
         const path = formatPath(name);
-
         return (
-          <Route
-            key={name}
+          <Route 
+            key={name} 
             path={`/${path}`}
             element={
               <ProtectedRoute>
@@ -104,13 +119,21 @@ const AuthenticatedApp = () => {
                   <PageComponent />
                 </LayoutWrapper>
               </ProtectedRoute>
-            }
+            } 
           />
         );
       })}
 
-      {!isAuthenticated && <Route path="*" element={<Navigate to="/login" replace />} />}
-      {isAuthenticated && <Route path="*" element={<PageNotFound />} />}
+      <Route 
+        path="*" 
+        element={
+          isAuthenticated ? (
+            <PageNotFound />
+          ) : (
+            <Navigate to="/login" state={{ from: location }} replace />
+          )
+        } 
+      />
     </Routes>
   );
 };
@@ -121,9 +144,9 @@ function App() {
       <QueryClientProvider client={queryClientInstance}>
         <Router>
           <NavigationTracker />
-          <AuthenticatedApp />
+          <AppRoutes />
+          <Toaster />
         </Router>
-        <Toaster />
       </QueryClientProvider>
     </AuthProvider>
   );
@@ -135,24 +158,22 @@ export default App;
 
 
 
-
-
-
 // import { Toaster } from "@/components/ui/toaster";
 // import { QueryClientProvider } from '@tanstack/react-query';
 // import { queryClientInstance } from '@/lib/query-client';
 // import NavigationTracker from '@/lib/NavigationTracker';
 // import { pagesConfig } from './pages.config';
-// import { BrowserRouter as Router, Route, Routes, Navigate } from 'react-router-dom';
+// import { BrowserRouter as Router, Route, Routes, Navigate, useLocation } from 'react-router-dom';
 // import PageNotFound from './lib/PageNotFound';
 // import { AuthProvider, useAuth } from '@/lib/AuthContext';
 // import UserNotRegisteredError from '@/components/UserNotRegisteredError';
 // import ResetPassword from './pages/ResetPassword';
 // import UserDeactivatedError from '@/components/UserDeactivatedError';
+// import ProtectedRoute from './components/ProtectedRoute';
 
 // const { Pages, Layout, mainPage } = pagesConfig;
 
-// // Helper to match your createPageUrl utility logic
+// // Utility to format page names to URL paths
 // const formatPath = (name) => {
 //   return name
 //     .replace(/([a-z])([A-Z])/g, '$1-$2')
@@ -163,20 +184,26 @@ export default App;
 // const mainPageKey = mainPage ?? Object.keys(Pages)[0];
 // const MainPage = Pages[mainPageKey] || (() => <></>);
 
-// const LayoutWrapper = ({ children, currentPageName }) => Layout ? 
-//   <Layout currentPageName={currentPageName}>{children}</Layout> 
-//   : <>{children}</>;
+// // Layout wrapper component
+// const LayoutWrapper = ({ children, currentPageName }) => {
+//   if (!Layout) return <>{children}</>;
+//   return <Layout currentPageName={currentPageName}>{children}</Layout>;
+// };
 
-// const AuthenticatedApp = () => {
+// // --- ROUTE LOGIC COMPONENT ---
+// const AppRoutes = () => {
 //   const { 
 //     isLoadingAuth, 
 //     isLoadingPublicSettings, 
 //     authError, 
-//     isAuthenticated,
+//     isAuthenticated, 
 //     userProfile 
 //   } = useAuth();
+  
+//   const location = useLocation();
 
-//   // 1. Loading state
+//   // 1. GLOBAL LOADING STATE
+//   // Keeps the screen clean while checking Supabase session + Profile table
 //   if (isLoadingPublicSettings || isLoadingAuth) {
 //     return (
 //       <div className="fixed inset-0 flex items-center justify-center bg-slate-50">
@@ -185,87 +212,111 @@ export default App;
 //     );
 //   }
 
-//   // 2. Registration Error state (Auth exists, but no Profile yet)
+//   // 2. REGISTRATION ERROR (Auth exists, but Profile row is missing in DB)
 //   if (authError?.type === 'user_not_registered') {
 //     return <UserNotRegisteredError />;
 //   }
 
 //   // 3. DEACTIVATED GUARD
-//   // If the user is authenticated but their profile status is 'inactive', 
-//   // we return the Error component immediately, blocking all routes.
 //   if (isAuthenticated && userProfile?.status === 'inactive') {
 //     return <UserDeactivatedError />;
 //   }
 
 //   return (
 //     <Routes>
-//       {/* PUBLIC ROUTE: Login */}
-//       <Route path="/login" element={
-//         Pages.Login ? (
-//           <LayoutWrapper currentPageName="Login">
-//             <Pages.Login />
+//       {/* --- PUBLIC ROUTES --- */}
+//       <Route 
+//         path="/login" 
+//         element={
+//           isAuthenticated ? (
+//             <Navigate to={`/${formatPath(mainPageKey)}`} replace />
+//           ) : (
+//             <LayoutWrapper currentPageName="Login">
+//               {Pages.Login ? <Pages.Login /> : (
+//                 <div className="p-10 text-red-500 font-mono">
+//                   Error: Login component missing
+//                 </div>
+//               )}
+//             </LayoutWrapper>
+//           )
+//         } 
+//       />
+      
+//       {/* ✅ CRITICAL FIX: Removed the 'isAuthenticated' redirect from /reset-password.
+//         Supabase creates a temporary session when clicking an email recovery link.
+//         If we redirect 'isAuthenticated' users here, they can never finish resetting!
+//       */}
+//       <Route 
+//         path="/reset-password" 
+//         element={
+//           <LayoutWrapper currentPageName="Reset Password">
+//             <ResetPassword />
 //           </LayoutWrapper>
-//         ) : (
-//           <div className="p-10 text-red-500 font-mono">Error: Login component missing in pages.config.js</div>
-//         )
-//       } />
+//         } 
+//       />
       
-//       {/* PUBLIC ROUTE: Reset Password */}
-//       <Route path="/reset-password" element={
-//         <LayoutWrapper currentPageName="Reset Password">
-//           <ResetPassword />
-//         </LayoutWrapper>
-//       } />
-      
-//       {/* Compatibility redirect for uppercase /Login */}
+//       {/* Redirect legacy /Login to /login */}
 //       <Route path="/Login" element={<Navigate to="/login" replace />} />
 
-//       {/* 4. AUTH GATEWAY */}
-//       {!isAuthenticated ? (
-//         <Route path="*" element={<Navigate to="/login" replace />} />
-//       ) : (
-//         <>
-//           {/* 5. PROTECTED ROUTES */}
-//           <Route path="/" element={
+//       {/* --- PROTECTED ROUTES --- */}
+//       {/* Root path redirects to the designated main page */}
+//       <Route 
+//         path="/" 
+//         element={
+//           <ProtectedRoute>
 //             <LayoutWrapper currentPageName={mainPageKey}>
 //               <MainPage />
 //             </LayoutWrapper>
-//           } />
+//           </ProtectedRoute>
+//         } 
+//       />
 
-//           {Object.entries(Pages).map(([name, PageComponent]) => {
-//             if (!PageComponent || name === 'Login') return null;
-//             const path = formatPath(name);
+//       {/* Dynamic protected routes for all pages defined in pages.config */}
+//       {Object.entries(Pages).map(([name, PageComponent]) => {
+//         if (!PageComponent || name === 'Login') return null;
+        
+//         const path = formatPath(name);
+        
+//         return (
+//           <Route 
+//             key={name} 
+//             path={`/${path}`}
+//             element={
+//               <ProtectedRoute>
+//                 <LayoutWrapper currentPageName={name}>
+//                   <PageComponent />
+//                 </LayoutWrapper>
+//               </ProtectedRoute>
+//             } 
+//           />
+//         );
+//       })}
 
-//             return (
-//               <Route
-//                 key={name}
-//                 path={`/${path}`}
-//                 element={
-//                   <LayoutWrapper currentPageName={name}>
-//                     <PageComponent />
-//                   </LayoutWrapper>
-//                 }
-//               />
-//             );
-//           })}
-          
-//           {/* Catch-all 404 for authenticated users */}
-//           <Route path="*" element={<PageNotFound />} />
-//         </>
-//       )}
+//       {/* --- FALLBACKS --- */}
+//       <Route 
+//         path="*" 
+//         element={
+//           isAuthenticated ? (
+//             <PageNotFound />
+//           ) : (
+//             <Navigate to="/login" state={{ from: location }} replace />
+//           )
+//         } 
+//       />
 //     </Routes>
 //   );
 // };
 
+// // --- MAIN APP COMPONENT ---
 // function App() {
 //   return (
 //     <AuthProvider>
 //       <QueryClientProvider client={queryClientInstance}>
 //         <Router>
 //           <NavigationTracker />
-//           <AuthenticatedApp />
+//           <AppRoutes />
+//           <Toaster />
 //         </Router>
-//         <Toaster />
 //       </QueryClientProvider>
 //     </AuthProvider>
 //   );

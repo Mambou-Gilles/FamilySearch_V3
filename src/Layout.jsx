@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Link, useLocation } from "react-router-dom"; // Added useLocation for reactive updates
+import { Link, useLocation } from "react-router-dom";
 import { createPageUrl } from "@/utils";
 import { useAuth } from "@/lib/AuthContext";
 import {
@@ -69,8 +69,9 @@ const HIDDEN_LAYOUT_PAGES = ["Home", "Login", "ForgotPassword", "ResetPassword"]
 const CHAT_ENABLED_ROLES = ["contributor", "reviewer", "team_lead", "manager", "admin"];
 
 export default function Layout({ children, currentPageName }) {
-  const { user, logout } = useAuth();
-  const location = useLocation(); // Hook to listen for URL changes
+  // ✅ FIX: Extract userProfile (DB data) alongside user (Auth data)
+  const { user, userProfile, logout } = useAuth();
+  const location = useLocation(); 
   const [mobileOpen, setMobileOpen] = useState(false);
   const now = useDateTime();
 
@@ -82,11 +83,15 @@ export default function Layout({ children, currentPageName }) {
   const urlParams = new URLSearchParams(location.search);
   const currentTab = urlParams.get("tab");
 
-  const role = user?.role || "contributor";
+  // ✅ FIX: Determine role from the profile table, not the auth user
+  const role = userProfile?.system_role || "contributor";
   const navItems = ROLE_NAV[role] || ROLE_NAV.contributor;
   const showChat = CHAT_ENABLED_ROLES.includes(role);
 
-  const firstName = user?.full_name?.split(" ")[0] || user?.email?.split("@")[0] || "there";
+  // ✅ FIX: Use profile full_name for a personalized experience
+  const displayEmail = user?.email || "";
+  const fullName = userProfile?.full_name || displayEmail.split("@")[0] || "User";
+  const firstName = fullName.split(" ")[0];
   const greeting = isNewUser(user) ? `Welcome, ${firstName}` : `Welcome back, ${firstName}`;
   
   const dateStr = now.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
@@ -118,9 +123,6 @@ export default function Layout({ children, currentPageName }) {
         <nav className="flex-1 p-3 space-y-1">
           {navItems.map(item => {
             const Icon = item.icon;
-            
-            // STRICT ACTIVE CHECK:
-            // Matches if the page is the same AND (the tab matches OR neither have a tab)
             const isActive = currentPageName === item.page && (
               item.tab ? currentTab === item.tab : !currentTab
             );
@@ -146,16 +148,19 @@ export default function Layout({ children, currentPageName }) {
             <div className="flex items-center gap-3 mb-3">
               <div className="w-8 h-8 bg-indigo-100 rounded-full flex items-center justify-center flex-shrink-0">
                 <span className="text-xs font-bold text-indigo-700">
-                  {(user.full_name || user.email || "?")[0].toUpperCase()}
+                  {fullName[0].toUpperCase()}
                 </span>
               </div>
               <div className="flex-1 min-w-0">
-                <p className="text-xs font-medium text-slate-900 truncate">{user.full_name || "User"}</p>
-                <p className="text-xs text-slate-400 truncate">{user.email}</p>
+                <p className="text-xs font-medium text-slate-900 truncate">{fullName}</p>
+                <p className="text-xs text-slate-400 truncate">{displayEmail}</p>
               </div>
             </div>
             <div className="flex items-center justify-between">
-              <span className="text-xs bg-indigo-50 text-indigo-600 px-2 py-0.5 rounded-full font-medium capitalize">{role.replace('_', ' ')}</span>
+              {/* ✅ Displays the formatted role name (e.g., 'team lead') */}
+              <span className="text-xs bg-indigo-50 text-indigo-600 px-2 py-0.5 rounded-full font-medium capitalize">
+                {role.replace(/_/g, ' ')}
+              </span>
               <button onClick={logout} className="text-xs text-slate-400 hover:text-slate-700 flex items-center gap-1 transition-colors">
                 <LogOut className="w-3 h-3" /> Sign out
               </button>

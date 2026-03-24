@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/lib/AuthContext";
-import { createPageUrl } from "@/utils";
+import { Loader2 } from "lucide-react"; // Matching your login style
 
 const ROLE_ROUTES = {
   admin: "AdminDashboard",
@@ -13,47 +13,51 @@ const ROLE_ROUTES = {
 };
 
 export default function Home() {
-  const { user, isAuthenticated, isLoadingAuth, authError } = useAuth();
+  // ✅ Use userProfile instead of just 'user'
+  const { isAuthenticated, userProfile, isLoadingAuth, authError } = useAuth();
   const navigate = useNavigate();
 
   useEffect(() => {
-    // 1. If still loading the session, do nothing yet
+    // 1. Wait for AuthContext to finish its work
     if (isLoadingAuth) return;
 
-    // 2. If not authenticated, send to Login
-    if (!isAuthenticated) {
-      navigate(createPageUrl("Login"), { replace: true });
+    // 2. If not logged in, go to login
+    if (!isAuthenticated && !authError) {
+      navigate("/login", { replace: true });
       return;
     }
 
-    // 3. If there is a registration error, the App.jsx will catch it, 
-    // but we stay here to prevent infinite redirect loops.
-    if (authError) return;
+    // 3. If there is a registration error, App.jsx handles the UI, 
+    // but we stop the redirect logic here.
+    if (authError?.type === 'user_not_registered') {
+      return;
+    }
 
-    // 4. Determine destination based on the 'role' we mapped in AuthContext
-    const role = user?.role || "contributor";
-    const targetPage = ROLE_ROUTES[role] || "ContributorDashboard";
+    // 4. ✅ FIX: Use the role from the profile, not the auth user
+    if (userProfile) {
+      const role = userProfile.system_role || "contributor";
+      const targetPage = ROLE_ROUTES[role] || "ContributorDashboard";
+      
+      // Convert "AdminDashboard" to "admin-dashboard" for the URL
+      const targetPath = targetPage
+        .replace(/([a-z])([A-Z])/g, '$1-$2')
+        .toLowerCase();
 
-    // 5. Navigate internally (No page reload = Much faster)
-    navigate(createPageUrl(targetPage), { replace: true });
+      navigate(`/${targetPath}`, { replace: true });
+    }
     
-  }, [user, isAuthenticated, isLoadingAuth, authError, navigate]);
+  }, [isAuthenticated, userProfile, isLoadingAuth, authError, navigate]);
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-center bg-slate-50">
       <div className="text-center space-y-6">
-        {/* Modern Spinner */}
-        <div className="relative w-16 h-16 mx-auto">
-          <div className="absolute inset-0 border-4 border-indigo-100 rounded-full"></div>
-          <div className="absolute inset-0 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin"></div>
-        </div>
-        
+        <Loader2 className="w-12 h-12 text-indigo-600 animate-spin mx-auto" />
         <div className="space-y-2">
-          <h2 className="text-xl font-semibold text-slate-800 tracking-tight">
-            FamilySearch Project Hub
+          <h2 className="text-xl font-semibold text-slate-800">
+            Project Hub
           </h2>
           <p className="text-sm text-slate-500 animate-pulse">
-            Verifying your permissions...
+            Loading your workspace...
           </p>
         </div>
       </div>

@@ -47,21 +47,33 @@ export default function ManagerUserTab({ profiles = [], assignments = [], setBul
   const [attritionData, setAttritionData] = useState({ targets: [], reason: "", loading: false });
   const [deleteData, setDeleteData] = useState({ ids: [], title: "", desc: "" });
   const [processing, setProcessing] = useState(false);
+  const [deleteConfirmInput, setDeleteConfirmInput] = useState("");
+
+  const [bulkTarget, setBulkTarget] = useState("");
+  const [savingBulk, setSavingBulk] = useState(false);
 
   // Derive Cohorts for Filter
   const cohorts = [...new Set(profiles.map(p => p.cohort).filter(Boolean))].sort();
+  // 1. First, strictly limit profiles to ONLY those that have an assignment in THIS project
+  // const projectAssignments = assignments.filter(a => a.project_id === myAssignment?.project_id);
+  // const projectUserEmails = new Set(projectAssignments.map(a => a.user_email));
+  const projectEmails = new Set(assignments.map(a => a.user_email));
 
   // Enriched Data for Table Logic
-  const enriched = profiles.map(p => {
-    const assign = assignments.find(a => a.user_email === p.email);
-    return { 
-      ...p, 
-      daily_target_assignment: assign?.daily_target, 
-      assignment_id: assign?.id,
-      geography: assign?.geography 
-    };
-  });
+  const enriched = profiles
+    .filter(p => projectEmails.has(p.email))// Safeguard: If they aren't assigned, don't show them
+    .filter(p => p.status === 'active') 
+    .map(p => {
+      const assign = assignments.find(a => a.user_email === p.email);
+      return { 
+        ...p, 
+        daily_target_assignment: assign?.daily_target, 
+        assignment_id: assign?.id,
+        geography: assign?.geography 
+      };
+    });
 
+    // 3. Apply your UI filters (Search, Role, Status) on top of the project-specific list
   const filtered = enriched.filter(p => {
     if (roleFilter !== "all" && p.system_role !== roleFilter) return false;
     if (statusFilter !== "all" && p.status !== statusFilter) return false;
@@ -89,96 +101,54 @@ export default function ManagerUserTab({ profiles = [], assignments = [], setBul
     return n;
   });
 
+  // --- Updated Handlers to match Admin Dashboard Logic ---
+
   async function handleSyncSelected() {
-  const toSync = filtered.filter(p => selectedIds.has(p.id) && !p.synced);
-  if (!toSync.length) return;
+    const toSync = filtered.filter(p => selectedIds.has(p.id) && !p.synced);
+    if (!toSync.length) return;
 
-  setSyncing(true);
-
-  try {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.access_token) {
-      toast.error("Your session has expired. Please log in again.");
-      return;
-    }
-
-    for (const user of toSync) {
-      const { error } = await supabase.functions.invoke("invite-user", {
-        body: {
-          email: user.email,
-          profileId: user.id,
-          fullName: user.full_name,
-          role: user.system_role,
-        },
-      });
-
-      if (error) {
-        console.error(`Sync failed for ${user.email}:`, error);
-        toast.error(`Failed to sync ${user.email}`);
-        continue;
+    setSyncing(true);
+    try {
+      // 1. Get current session for Authorization
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) {
+        toast.error("Session expired. Please log in again.");
+        return;
       }
+
+      for (const user of toSync) {
+        const { error } = await supabase.functions.invoke("invite-user", {
+          body: {
+            email: user.email.toLowerCase(),
+            full_name: user.full_name,
+            role: user.system_role,
+            // We pass profileId so the Edge Function knows which row to update
+            profileId: user.id 
+          },
+          headers: {
+            Authorization: `Bearer ${session.access_token}`
+          }
+        });
+
+        if (error) {
+          console.error(`Sync failed for ${user.email}:`, error);
+          toast.error(`Failed to sync ${user.email}`);
+          continue;
+        }
+      }
+
+      toast.success("Sync process completed.");
+      onRefreshProfiles();
+      setSelectedIds(new Set());
+    } catch (err) {
+      console.error("Sync Error:", err);
+      toast.error("Unexpected error during sync.");
+    } finally {
+      setSyncing(false);
     }
-
-    toast.success("Sync process completed.");
-    onRefreshProfiles();
-    setSelectedIds(new Set());
-  } catch (err) {
-    console.error("Sync Error:", err);
-    toast.error("An unexpected error occurred during sync.");
-  } finally {
-    setSyncing(false);
   }
-}
 
-  // async function handleSyncSelected() {
-  //   const toSync = filtered.filter(p => selectedIds.has(p.id) && !p.synced);
-  //   if (!toSync.length) return;
-
-  //   setSyncing(true);
-  //   try {
-  //     // 1. Get the session once before starting the loop
-  //     const { data: { session } } = await supabase.auth.getSession();
-  //     const token = session?.access_token;
-
-  //     if (!token) {
-  //       toast.error("Your session has expired. Please log in again.");
-  //       return;
-  //     }
-
-  //     // 2. Loop through users and call the Edge Function
-  //     for (const user of toSync) {
-  //       console.log("Checking Key:", import.meta.env.VITE_SUPABASE_SERVICE_ROLE_KEY ? "Key Exists" : "Key is MISSING");
-  //       const { data, error } = await supabase.functions.invoke('invite-user', {
-  //         body: { 
-  //           email: user.email, 
-  //           profileId: user.id,
-  //           fullName: user.full_name,
-  //           role: user.system_role
-  //         },
-  //         headers: {
-  //           'x-service-key': import.meta.env.VITE_SUPABASE_SERVICE_ROLE_KEY.trim()
-  //         }
-  //       });
-
-  //       if (error) {
-  //         console.error(`Sync failed for ${user.email}:`, error);
-  //         toast.error(`Failed to sync ${user.email}`);
-  //         continue; // Keep going with the next user even if one fails
-  //       }
-  //     }
-
-  //     toast.success("Sync process completed.");
-  //     onRefreshProfiles();
-  //     setSelectedIds(new Set());
-  //   } catch (err) {
-  //     console.error("Sync Error:", err);
-  //     toast.error("An unexpected error occurred during sync.");
-  //   } finally {
-  //     setSyncing(false);
-  //   }
-  // }
-
-  // Function to refresh everyone's last_login from Auth
+  // Refreshing statuses also uses the same Edge Function (to check Auth state)
   async function handleRefreshStatuses() {
     const syncedUsers = profiles.filter(p => p.synced);
     if (!syncedUsers.length) return;
@@ -186,28 +156,52 @@ export default function ManagerUserTab({ profiles = [], assignments = [], setBul
     setSyncing(true);
     const toastId = toast.loading("Updating login statuses...");
 
-    for (const user of syncedUsers) {
-      await supabase.functions.invoke('invite-user', {
-        body: { email: user.email, profileId: user.id, fullName: user.full_name, role: user.system_role },
-        headers: { 'x-service-key': import.meta.env.VITE_SUPABASE_SERVICE_ROLE_KEY.trim() }
-      });
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      for (const user of syncedUsers) {
+        await supabase.functions.invoke('invite-user', {
+          body: { 
+            email: user.email.toLowerCase(), 
+            profileId: user.id, 
+            full_name: user.full_name, 
+            role: user.system_role 
+          },
+          headers: {
+            Authorization: `Bearer ${session?.access_token}`
+          }
+        });
+      }
+      toast.success("Statuses refreshed");
+    } catch (err) {
+      toast.error("Status refresh failed");
+    } finally {
+      toast.dismiss(toastId);
+      setSyncing(false);
+      onRefreshProfiles();
     }
-
-    toast.dismiss(toastId);
-    toast.success("Statuses refreshed");
-    setSyncing(false);
-    onRefreshProfiles();
   }
 
-  // Function to nudge a specific pending user
+  // Nudge function (Resend Invite)
   async function handleNudge(user) {
     setSyncing(true);
+    const { data: { session } } = await supabase.auth.getSession();
+    
     const { error } = await supabase.functions.invoke('invite-user', {
-      body: { email: user.email, profileId: user.id, fullName: user.full_name, role: user.system_role },
-      headers: { 'x-service-key': import.meta.env.VITE_SUPABASE_SERVICE_ROLE_KEY.trim() }
+      body: { 
+        email: user.email.toLowerCase(), 
+        profileId: user.id, 
+        full_name: user.full_name, 
+        role: user.system_role 
+      },
+      headers: {
+        Authorization: `Bearer ${session?.access_token}`
+      }
     });
     
     if (!error) toast.success(`Reminder sent to ${user.email}`);
+    else toast.error("Failed to send reminder");
+    
     setSyncing(false);
     onRefreshProfiles();
   }
@@ -216,38 +210,36 @@ export default function ManagerUserTab({ profiles = [], assignments = [], setBul
     setProcessing(true);
     try {
       if (userForm.id) {
-        // 1. Update the Profile
-        // 1. Update existing user using the secure RPC
-        // This bypasses RLS issues and triggers the team_assignments sync
+        // 1. Update existing user using your 'admin_and_manager_update_user' RPC
         const { error } = await supabase.rpc('admin_and_manager_update_user', {
           p_user_id: userForm.id,
           p_full_name: userForm.full_name || "",
           p_role: userForm.system_role,
-          p_status: userForm.status,
+          p_status: userForm.status.toLowerCase(),
           p_cohort: userForm.cohort || "",
-          p_email: userForm.email // Important for the trigger to find the assignment!
+          p_byu_id: userForm.byu_pathway_id || "", // Ensure this is in your update RPC too!
+          p_email: userForm.email
         });
-        
         if (error) throw error;
 
       } else {
-        // 2. Logic for New User (Existing RPC)
+        // 2. Create NEW user using the 'admin_add_user_to_team' RPC
         const { error } = await supabase.rpc('admin_add_user_to_team', {
-          p_email: userForm.email,
+          p_email: userForm.email.toLowerCase().trim(),
           p_full_name: userForm.full_name,
           p_role: userForm.system_role,
           p_project_id: myAssignment.project_id,
+          p_geography: userForm.geography || myAssignment.geography,
           p_project_type: myAssignment.project_type,
-          p_geography: userForm.geography || myAssignment.geography
+          p_cohort: userForm.cohort || "",
+          p_byu_id: userForm.byu_pathway_id || "" // Passing the new ID here
         });
         if (error) throw error;
       }
 
-      toast.success("User updated and synchronized");
+      toast.success("User synchronized successfully");
       setEditUserOpen(false);
       setAddUserOpen(false);
-      
-      // 3. Refresh the data so both tabs show the latest info
       onRefreshProfiles(); 
 
     } catch (err) { 
@@ -273,11 +265,19 @@ export default function ManagerUserTab({ profiles = [], assignments = [], setBul
     setProcessing(false);
   }
 
+
   async function handleConfirmAttrition() {
-    setAttritionData(d => ({ ...d, loading: true }));
+    if (!attritionData.reason.trim()) {
+      toast.error("Please provide a reason.");
+      return;
+    }
+
+    setAttritionData(prev => ({ ...prev, loading: true }));
+    
     try {
-      for (const p of attritionData.targets) {
-        await supabase.rpc('admin_attrite_user', {
+      // This RPC handles: 1. Moving to attrition table 2. Deleting assignment 3. Setting profile to inactive
+      const attritionPromises = attritionData.targets.map(p => 
+        supabase.rpc('admin_attrite_user', {
           p_profile_id: p.id,
           p_email: p.email,
           p_full_name: p.full_name,
@@ -288,25 +288,69 @@ export default function ManagerUserTab({ profiles = [], assignments = [], setBul
           p_project_type: myAssignment?.project_type,
           p_deleted_by: myAssignment?.user_email,
           p_notes: attritionData.reason
-        });
-      }
-      toast.success("Attrition records updated");
+        })
+      );
+
+      await Promise.all(attritionPromises);
+
+      toast.success(`${attritionData.targets.length} user(s) moved to attrition history.`);
+      
       setAttritionOpen(false);
       setSelectedIds(new Set());
-      onRefreshProfiles();
-    } catch (err) { toast.error(err.message); } finally { setAttritionData(d => ({ ...d, loading: false })); }
+      onRefreshProfiles(); // This triggers the parent to re-fetch, and our new filter above will hide them.
+      
+    } catch (err) {
+      console.error("Attrition Error:", err);
+      toast.error(`Attrition failed: ${err.message}`);
+    } finally {
+      setAttritionData(prev => ({ ...prev, loading: false }));
+    }
   }
 
   async function handlePermanentDelete() {
+    const idsToDelete = [...deleteData.ids];
+    if (idsToDelete.length === 0) return;
+
+    const targetUser = enriched.find(p => p.id === idsToDelete[0]);
+    const expectedMatch = idsToDelete.length === 1 
+      ? targetUser?.full_name 
+      : `${idsToDelete.length} USERS`;
+
+    if (deleteConfirmInput.trim().toLowerCase() !== expectedMatch?.toLowerCase()) {
+      toast.error(`Confirmation mismatch. Please type: ${expectedMatch}`);
+      return;
+    }
+
     setProcessing(true);
-    const { error } = await supabase.from('profiles').delete().in('id', deleteData.ids);
-    if (!error) {
-      toast.success("Users purged from system");
+    try {
+      // 1. Delete assignments first
+      await supabase.from('team_assignments').delete().in('user_id', idsToDelete);
+
+      // 2. Delete from profiles AND check the count
+      const { error, count } = await supabase
+        .from('profiles')
+        .delete({ count: 'exact' }) // This tells us if anything actually happened
+        .in('id', idsToDelete);
+
+      if (error) throw error;
+
+      if (count === 0) {
+        throw new Error("Delete failed: You may not have database permission to remove these records.");
+      }
+
+      toast.success(`${count} record(s) permanently purged.`);
+      
       setDeleteDialogOpen(false);
+      setDeleteConfirmInput("");
       setSelectedIds(new Set());
       onRefreshProfiles();
+
+    } catch (err) {
+      console.error("Purge Error:", err);
+      toast.error(err.message);
+    } finally {
+      setProcessing(false);
     }
-    setProcessing(false);
   }
 
   // --- Date Formatter ---
@@ -314,14 +358,49 @@ export default function ManagerUserTab({ profiles = [], assignments = [], setBul
         if (!dateStr) return <span className="text-[10px] text-slate-300 italic">No activity yet</span>;
         const d = new Date(dateStr);
         return (
-          <div className="flex flex-col group cursor-help">
+          <div className="flex flex-col leading-tight">
             <span className="text-slate-700 font-medium">{d.toLocaleDateString()}</span>
-            <span className="text-[9px] text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity">
-              Active at {d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+            <span className="text-[10px] text-indigo-500 font-medium">
+              Active at {d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit'})}
             </span>
           </div>
         );
       };
+
+    async function saveBulkTarget() {
+      if (!bulkTarget || isNaN(bulkTarget)) return;
+      
+      setSavingBulk(true);
+      try {
+        // Get all contributors from your profiles list
+        const contributorEmails = profiles
+          .filter(p => p.system_role === 'contributor')
+          .map(p => p.email);
+
+        if (contributorEmails.length === 0) {
+          toast.error("No contributors found in this project.");
+          return;
+        }
+
+        // 2. Perform the update in team_assignments table
+        const { error } = await supabase
+          .from('team_assignments')
+          .update({ daily_target: Number(bulkTarget) })
+          .eq('project_id', myAssignment?.project_id)
+          .in('user_email', contributorEmails);
+
+        if (error) throw error;
+
+        toast.success(`Target set to ${bulkTarget} for ${contributorEmails.length} contributors`);
+        setBulkTarget("");
+        onRefreshProfiles();
+      } catch (err) {
+        console.error("Bulk Target Error:", err);
+        toast.error("Failed to apply bulk target");
+      } finally {
+        setSavingBulk(false);
+      }
+    }
 
   return (
     <div className="space-y-4">
@@ -346,29 +425,70 @@ export default function ManagerUserTab({ profiles = [], assignments = [], setBul
         </div>
       </div>
 
-      {/* Filter Bar */}
-      <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 flex flex-wrap items-center gap-3 shadow-sm">
-        <div className="relative flex-1 min-w-[200px]">
-          <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-          <input type="text" placeholder="Search name or email..." value={searchQuery} onChange={e => { setSearchQuery(e.target.value); setPage(0); }}
-            className="w-full pl-9 pr-4 py-1.5 text-sm border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500" />
+      {/* Search, Bulk Target, and Filters Row */}
+      <div className="flex flex-wrap items-end gap-3 mb-4">
+        
+        {/* 1. Search Bar - Reduced Width */}
+        <div className="relative w-full max-w-xs">
+          <label className="text-[10px] font-bold text-slate-400 uppercase ml-1 mb-1 block">Find User</label>
+          <div className="relative">
+            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input 
+              type="text" 
+              placeholder="Name or email..." 
+              value={searchQuery} 
+              onChange={e => { setSearchQuery(e.target.value); setPage(0); }}
+              className="w-full pl-9 pr-4 py-2 text-sm border border-slate-200 rounded-xl bg-white outline-none focus:ring-2 focus:ring-indigo-500 shadow-sm h-10" 
+            />
+          </div>
         </div>
-        <select value={roleFilter} onChange={e => setRoleFilter(e.target.value)} className="text-sm border-slate-200 rounded-lg px-2 py-1.5 bg-white shadow-sm">
-          <option value="all">All Roles</option>
-          <option value="contributor">Contributor</option>
-          <option value="reviewer">Reviewer</option>
-          <option value="team_lead">Team Lead</option>
-        </select>
-        <select value={syncFilter} onChange={e => setSyncFilter(e.target.value)} className="text-sm border-slate-200 rounded-lg px-2 py-1.5 bg-white text-indigo-600 font-bold shadow-sm">
-          <option value="all">Auth Status (All)</option>
-          <option value="not_synced">Not Invited</option>
-          <option value="pending">Pending (Invited)</option>
-          <option value="confirmed">Confirmed</option>
-        </select>
-        <select value={cohortFilter} onChange={e => setCohortFilter(e.target.value)} className="text-sm border-slate-200 rounded-lg px-2 py-1.5 bg-white shadow-sm">
-          <option value="all">All Cohorts</option>
-          {cohorts.map(c => <option key={c} value={c}>{c}</option>)}
-        </select>
+
+        {/* 2. Bulk Target Setter (Contributors Only) */}
+        <div className="bg-slate-50 border border-slate-200 rounded-xl p-1.5 px-3 flex gap-3 items-center shadow-sm h-10 flex-1 min-w-[300px]">
+          <div className="flex flex-col border-r border-slate-200 pr-3">
+            <span className="text-[9px] font-bold text-indigo-600 uppercase leading-none">Bulk Contributor</span>
+            <span className="text-[9px] text-slate-400 font-medium italic">Target</span>
+          </div>
+          
+          <input 
+            type="number" 
+            value={bulkTarget} 
+            onChange={e => setBulkTarget(e.target.value)} 
+            placeholder="0" 
+            className="text-sm border border-slate-200 rounded-lg px-2 py-1 bg-white w-16 h-7 outline-none focus:ring-2 focus:ring-indigo-500 font-mono" 
+          />
+          
+          <Button 
+            size="sm" 
+            onClick={saveBulkTarget} 
+            disabled={savingBulk || !bulkTarget} 
+            className="bg-indigo-600 hover:bg-indigo-700 text-white h-7 px-3 text-[11px] font-bold rounded-lg"
+          >
+            {savingBulk ? <RefreshCw className="w-3 h-3 animate-spin" /> : "Apply"}
+          </Button>
+        </div>
+
+        {/* 3. Filters - Compact Row */}
+        <div className="flex items-center gap-2 flex-wrap">
+          <select value={roleFilter} onChange={e => setRoleFilter(e.target.value)} className="h-10 text-[12px] border-slate-200 rounded-xl px-3 bg-white shadow-sm outline-none focus:ring-2 focus:ring-indigo-500">
+            <option value="all">All Roles</option>
+            <option value="contributor">Contributor</option>
+            <option value="reviewer">Reviewer</option>
+            <option value="team_lead">Team Lead</option>
+          </select>
+
+          <select value={syncFilter} onChange={e => setSyncFilter(e.target.value)} className="h-10 text-[12px] border-slate-200 rounded-xl px-3 bg-white text-indigo-600 font-bold shadow-sm outline-none focus:ring-2 focus:ring-indigo-500">
+            <option value="all">Auth (All)</option>
+            <option value="not_synced">Not Invited</option>
+            <option value="pending">Pending</option>
+            <option value="confirmed">Confirmed</option>
+          </select>
+
+          <select value={cohortFilter} onChange={e => setCohortFilter(e.target.value)} className="h-10 text-[12px] border-slate-200 rounded-xl px-3 bg-white shadow-sm outline-none focus:ring-2 focus:ring-indigo-500">
+            <option value="all">All Cohorts</option>
+            {cohorts.map(c => <option key={c} value={c}>{c}</option>)}
+          </select>
+        </div>
       </div>
 
       {/* Bulk Action Strip */}
@@ -410,7 +530,16 @@ export default function ManagerUserTab({ profiles = [], assignments = [], setBul
                   <td className="p-4">
                     <div className="font-bold text-slate-900 leading-tight">{p.full_name}</div>
                     <div className="text-[11px] text-slate-400 font-medium">{p.email}</div>
-                    <div className="text-[10px] mt-1 text-indigo-500 font-mono font-bold uppercase">{p.cohort || "No Cohort"}</div>
+                    <div className="flex gap-2 mt-1">
+                      <span className="text-[10px] text-indigo-500 font-mono font-bold uppercase">
+                        {p.cohort || "No Cohort"}
+                      </span>
+                      {p.byu_pathway_id && (
+                        <span className="text-[10px] text-slate-400 font-mono italic">
+                          • ID: {p.byu_pathway_id}
+                        </span>
+                      )}
+                    </div>
                   </td>
                   <td className="p-4">
                     <div className="flex flex-col gap-1 items-start">
@@ -421,8 +550,24 @@ export default function ManagerUserTab({ profiles = [], assignments = [], setBul
                     </div>
                   </td>
                   <td className="p-4 text-center">
-                    {!p.synced ? (
-                      <span className="text-[9px] font-bold text-slate-400 uppercase tracking-tight">Unsynced</span>
+                    {p.status === 'attrited' ? (
+                      <div className="flex flex-col items-center">
+                        <span className="px-2 py-0.5 rounded bg-slate-100 text-slate-500 text-[9px] font-bold uppercase">Attrited</span>
+                        <button 
+                          onClick={() => {
+                            setUserForm(p); 
+                            setEditUserOpen(true); 
+                          }} 
+                          className="text-[8px] text-indigo-600 hover:underline mt-1 font-bold"
+                        >
+                          Restore?
+                        </button>
+                      </div>
+                    ) : !p.synced ? (
+                      <div className="flex flex-col items-center">
+                        <span className="text-[9px] font-bold text-slate-400 uppercase tracking-tight">Unsynced</span>
+                        <button onClick={() => handleNudge(p)} className="text-[8px] text-indigo-600 hover:underline mt-1 font-bold">Invite</button>
+                      </div>
                     ) : !p.last_login ? (
                       <div className="flex flex-col items-center">
                         <span className="px-2 py-0.5 rounded bg-amber-100 text-amber-700 text-[9px] font-bold uppercase animate-pulse">Pending</span>
@@ -498,9 +643,28 @@ export default function ManagerUserTab({ profiles = [], assignments = [], setBul
                 </select>
               </div>
             </div>
-            <div className="space-y-1">
-              <label className="text-[10px] font-bold text-slate-400 uppercase">Cohort Assignment</label>
-              <input type="text" value={userForm.cohort} onChange={e => setUserForm({...userForm, cohort: e.target.value})} className="w-full text-sm border p-2.5 rounded-xl" placeholder="e.g. March 2026" />
+            {/* Cohort & BYU ID Grid */}
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Cohort</label>
+                <input 
+                  type="text" 
+                  value={userForm.cohort || ""} 
+                  onChange={e => setUserForm({...userForm, cohort: e.target.value})} 
+                  className="w-full text-sm border p-2.5 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500" 
+                  placeholder="e.g. March 2026" 
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">BYU ID</label>
+                <input 
+                  type="text" 
+                  value={userForm.byu_pathway_id || ""} 
+                  onChange={e => setUserForm({...userForm, byu_pathway_id: e.target.value})} 
+                  className="w-full text-sm border p-2.5 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 font-mono" 
+                  placeholder="00000000" 
+                />
+              </div>
             </div>
             <Button onClick={handleSaveUser} disabled={processing} className="w-full bg-indigo-600 text-white font-bold h-11 rounded-xl shadow-lg shadow-indigo-100">
               {processing ? "Processing..." : userForm.id ? "Update User" : "Register User"}
@@ -535,19 +699,48 @@ export default function ManagerUserTab({ profiles = [], assignments = [], setBul
         </DialogContent>
       </Dialog>
 
-      {/* Permanent Purge AlertDialog */}
-      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+      {/* Permanent Purge AlertDialog with Safety Check */}
+      <AlertDialog open={deleteDialogOpen} onOpenChange={(open) => {
+        setDeleteDialogOpen(open);
+        if (!open) setDeleteConfirmInput("");
+      }}>
         <AlertDialogContent className="rounded-2xl border-none shadow-2xl">
           <AlertDialogHeader>
             <div className="flex items-center gap-2 text-red-600 mb-2">
               <AlertTriangle className="w-6 h-6" />
               <AlertDialogTitle className="text-lg font-bold">{deleteData.title}</AlertDialogTitle>
             </div>
-            <AlertDialogDescription className="text-slate-600 font-medium">{deleteData.desc}</AlertDialogDescription>
+            <div className="text-slate-600 font-medium space-y-3">
+              <p>{deleteData.desc}</p>
+              
+              <div className="bg-red-50 p-4 rounded-xl border border-red-100">
+                <p className="text-[11px] text-red-700 font-bold uppercase mb-2">
+                  To confirm, type: <span className="underline decoration-red-400">
+                    {deleteData.ids.length === 1 
+                      ? enriched.find(p => p.id === deleteData.ids[0])?.full_name 
+                      : `${deleteData.ids.length} USERS`}
+                  </span>
+                </p>
+                <input 
+                  type="text" 
+                  value={deleteConfirmInput}
+                  onChange={(e) => setDeleteConfirmInput(e.target.value)}
+                  placeholder="Type exactly as shown..."
+                  className="w-full p-2.5 border border-red-200 rounded-lg text-sm font-medium focus:ring-2 focus:ring-red-500 outline-none bg-white text-slate-900"
+                />
+              </div>
+            </div>
           </AlertDialogHeader>
-          <AlertDialogFooter className="mt-4">
-            <AlertDialogCancel className="bg-slate-100 border-none rounded-xl">Discard</AlertDialogCancel>
-            <AlertDialogAction onClick={handlePermanentDelete} className="bg-red-600 hover:bg-red-700 text-white font-bold rounded-xl shadow-lg shadow-red-100">Purge Permanently</AlertDialogAction>
+          <AlertDialogFooter className="mt-4 flex gap-2">
+            <AlertDialogCancel className="bg-slate-100 border-none rounded-xl m-0">Cancel</AlertDialogCancel>
+            {/* Using standard Button here instead of AlertDialogAction for reliability */}
+            <Button 
+              onClick={handlePermanentDelete} 
+              disabled={processing || !deleteConfirmInput.trim()}
+              className="bg-red-600 hover:bg-red-700 text-white font-bold rounded-xl shadow-lg shadow-red-100 disabled:opacity-50"
+            >
+              {processing ? "Purging..." : "Confirm Purge"}
+            </Button>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

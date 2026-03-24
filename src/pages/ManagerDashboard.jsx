@@ -52,6 +52,18 @@ export default function ManagerDashboard() {
   // --- TAB SYNC LOGIC ---
   const [activeTab, setActiveTab] = useState(new URLSearchParams(location.search).get("tab") || "team");
 
+  useEffect(() => {
+      const channel = supabase
+        .channel('schema-db-changes')
+        .on('postgres_changes', 
+          { event: 'UPDATE', schema: 'public', table: 'profiles' }, 
+          () => onRefresh() // Trigger a re-fetch whenever a profile changes
+        )
+        .subscribe()
+  
+      return () => supabase.removeChannel(channel)
+    }, [])
+
   // Update internal state when URL changes (e.g., clicking Sidebar)
   useEffect(() => {
     const tabFromUrl = new URLSearchParams(location.search).get("tab") || "team";
@@ -94,7 +106,7 @@ export default function ManagerDashboard() {
 
     const [projRes, taskRes, assignRes] = await Promise.all([
       supabase.from('projects').select('*').eq('id', projectId).single(),
-      supabase.from('tasks').select('*').eq('project_id', projectId).eq('geography', geography).order('date_completed', { ascending: false }).limit(1000),
+      supabase.from('tasks').select('*').eq('project_id', projectId).order('date_completed', { ascending: false }).limit(2000),
       supabase.from('team_assignments').select('*').eq('project_id', projectId).eq('geography', geography)
     ]);
 
@@ -107,7 +119,8 @@ export default function ManagerDashboard() {
       const { data: profs } = await supabase
         .from('profiles')
         .select('*')
-        .in('email', teamEmails);
+        .in('email', teamEmails)
+        .eq('status', 'active');
       setProfiles(profs || []);
     }
     setLoading(false);
@@ -181,7 +194,7 @@ export default function ManagerDashboard() {
           p_full_name: assignForm.user_name,
           p_role: assignForm.role,
           p_project_id: projectId,
-          p_project_type: project?.project_type,
+          p_project_type: project?.project_type?.toLowerCase(),
           p_geography: geography
         });
         if (error) throw error;
@@ -199,30 +212,107 @@ export default function ManagerDashboard() {
     }
   }
 
+  // async function deleteAssignment(id, a) {
+  //   try {
+  //     await supabase.from('attrition').insert({ email: a.user_email, full_name: a.user_name, role: a.role, geography: a.geography, project_id: a.project_id, date_of_attrition: new Date().toISOString() });
+  //     const { error } = await supabase.from('team_assignments').delete().eq('id', id);
+  //     if (error) throw error;
+  //     setAssignments(prev => prev.filter(x => x.id !== id));
+  //     setSelectedUsers(prev => { const n = new Set(prev); n.delete(id); return n; });
+  //     toast.success("Removed");
+  //   } catch (err) {
+  //     toast.error(err.message);
+  //   }
+  // }
+
   async function deleteAssignment(id, a) {
+    const profile = profiles.find(p => p.email === a.user_email);
+    if (!profile) {
+      toast.error("Could not find profile.");
+      return;
+    }
+
+    if (!confirm(`Move ${a.user_name} to attrition?`)) return;
+
     try {
-      await supabase.from('attrition').insert({ email: a.user_email, full_name: a.user_name, role: a.role, geography: a.geography, project_id: a.project_id, date_of_attrition: new Date().toISOString() });
-      const { error } = await supabase.from('team_assignments').delete().eq('id', id);
+      const { error } = await supabase.rpc('admin_attrite_user', {
+        p_profile_id: profile.id,
+        p_email: a.user_email,
+        p_full_name: a.user_name,
+        p_role: a.role,
+        p_byu_id: profile.byu_pathway_id || null, // Ensure this is sent
+        p_cohort: profile.cohort || "",
+        p_geography: a.geography,
+        p_project_id: a.project_id,
+        p_project_type: project?.project_type,
+        p_deleted_by: user.email,
+        p_notes: "Removed via Manager Dashboard"
+      });
+
       if (error) throw error;
+
+      toast.success("User moved to attrition.");
+      // Refresh local lists
       setAssignments(prev => prev.filter(x => x.id !== id));
-      setSelectedUsers(prev => { const n = new Set(prev); n.delete(id); return n; });
-      toast.success("Removed");
+      setProfiles(prev => prev.filter(p => p.email !== a.user_email));
     } catch (err) {
       toast.error(err.message);
     }
   }
 
+  // async function deleteSelectedUsers() {
+  //   if (!confirm(`Remove ${selectedUsers.size} selected assignment(s)?`)) return;
+  //   const toDelete = assignments.filter(a => selectedUsers.has(a.id));
+  //   try {
+  //     await Promise.all(toDelete.map(async a => {
+  //       await supabase.from('attrition').insert({ email: a.user_email, full_name: a.user_name, role: a.role, geography: a.geography, project_id: a.project_id, date_of_attrition: new Date().toISOString() });
+  //       return supabase.from('team_assignments').delete().eq('id', a.id);
+  //     }));
+  //     toast.success(`${selectedUsers.size} removed`);
+  //     setAssignments(prev => prev.filter(a => !selectedUsers.has(a.id)));
+  //     setSelectedUsers(new Set());
+  //   } catch (err) {
+  //     toast.error(err.message);
+  //   }
+  // }
+
   async function deleteSelectedUsers() {
-    if (!confirm(`Remove ${selectedUsers.size} selected assignment(s)?`)) return;
-    const toDelete = assignments.filter(a => selectedUsers.has(a.id));
+    if (!selectedUsers.size) return;
+    if (!confirm(`Move ${selectedUsers.size} selected users to attrition history?`)) return;
+
+    const toAttrite = assignments.filter(a => selectedUsers.has(a.id));
+    
     try {
-      await Promise.all(toDelete.map(async a => {
-        await supabase.from('attrition').insert({ email: a.user_email, full_name: a.user_name, role: a.role, geography: a.geography, project_id: a.project_id, date_of_attrition: new Date().toISOString() });
-        return supabase.from('team_assignments').delete().eq('id', a.id);
-      }));
-      toast.success(`${selectedUsers.size} removed`);
-      setAssignments(prev => prev.filter(a => !selectedUsers.has(a.id)));
+      const promises = toAttrite.map(a => {
+        const p = profiles.find(prof => prof.email === a.user_email);
+        return supabase.rpc('admin_attrite_user', {
+          p_profile_id: p?.id,
+          p_email: a.user_email,
+          p_full_name: a.user_name,
+          p_role: a.role,
+          p_cohort: p?.cohort || "",
+          p_geography: a.geography,
+          p_project_id: a.project_id,
+          p_project_type: project?.project_type?.toLowerCase(),
+          p_deleted_by: user.email,
+          p_notes: "Bulk Attrition"
+        });
+      });
+
+      const results = await Promise.all(promises);
+      const errors = results.filter(r => r.error);
+
+      if (errors.length > 0) throw new Error(`${errors.length} updates failed.`);
+
+      toast.success(`${selectedUsers.size} users moved to attrition.`);
+      
+      // Refresh data
       setSelectedUsers(new Set());
+      const { data: newAsgns } = await supabase.from('team_assignments').select('*').eq('project_id', projectId).eq('geography', geography);
+      setAssignments(newAsgns || []);
+      // Re-run the refresh logic to update profiles too
+      onRefresh(); 
+
     } catch (err) {
       toast.error(err.message);
     }
@@ -312,12 +402,24 @@ export default function ManagerDashboard() {
             myAssignment={myAssignment}
             setBulkProfileOpen={setBulkProfileOpen}
             onRefreshProfiles={async () => {
-              const [profRes, asgnRes] = await Promise.all([
-                supabase.from('profiles').select('*'),
-                supabase.from('team_assignments').select('*').eq('project_id', projectId).eq('geography', geography)
-              ]);
-              setProfiles(profRes.data || []);
-              setAssignments(asgnRes.data || []);
+              // 1. Fetch assignments first to get the list of relevant emails
+              const { data: asgnData } = await supabase
+                .from('team_assignments')
+                .select('*')
+                .eq('project_id', projectId)
+                .eq('geography', geography);
+
+              const emails = asgnData?.map(a => a.user_email) || [];
+
+              // 2. Only fetch profiles that match those emails
+              const { data: profData } = await supabase
+                .from('profiles')
+                .select('*')
+                .in('email', emails)
+                .eq('status', 'active');
+
+              setAssignments(asgnData || []);
+              setProfiles(profData || []);
             }}
           />
         </TabsContent>
@@ -368,8 +470,13 @@ export default function ManagerDashboard() {
       {bulkTaskOpen && (
         <BulkTaskUpload open={bulkTaskOpen} onClose={() => setBulkTaskOpen(false)} projectId={projectId} projectType={project?.project_type || "hints"} cohort=""
           onSuccess={async () => { 
-            const { data } = await supabase.from('tasks').select('*').eq('project_id', projectId).eq('geography', geography).order('date_completed', { ascending: false }).limit(1000);
-            setTasks(data || []); 
+            const { data } = await supabase
+              .from('tasks')
+              .select('*')
+              .eq('project_id', projectId) 
+              .order('date_completed', { ascending: false })
+              .limit(2000);
+            setTasks(data || []);
           }} />
       )}
       {bulkProfileOpen && (

@@ -33,14 +33,26 @@ export default function ReviewerTaskPanel({
         >
           <ChevronLeft className="w-4 h-4 mr-1" /> EXIT
         </Button>
-        <div className="h-8 w-px bg-slate-200" />
-        <div>
-          <h2 className="text-sm font-black text-slate-900 uppercase tracking-tight">
-            Auditing: {selectedContributor.user_name}
-          </h2>
-          <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">
-            {selectedDate ? `Batch: ${selectedDate} • ` : ""}{contribTasks.length} Pending
-          </p>
+        <div className="h-10 w-px bg-slate-200 mx-1" />
+        <div className="flex items-center gap-4">
+          <div>
+            <h2 className="text-sm font-black text-slate-900 uppercase tracking-tight leading-none">
+              Auditing: {selectedContributor.user_name}
+            </h2>
+            <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1">
+              {selectedDate ? `Batch: ${selectedDate}` : "Select Batch"}
+            </p>
+          </div>
+
+          {/* High-Visibility Count */}
+          <div className="flex flex-col items-center justify-center bg-amber-50 border border-amber-100 px-3 py-1 rounded-lg">
+            <span className="text-lg font-black text-amber-700 leading-none">
+              {contribTasks.length}
+            </span>
+            <span className="text-[8px] font-black text-amber-600 uppercase tracking-tighter">
+              Pending
+            </span>
+          </div>
         </div>
       </div>
 

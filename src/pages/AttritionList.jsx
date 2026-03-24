@@ -112,53 +112,25 @@ export default function AttritionList() {
 
     setReactivatingId(record.id);
     try {
-      // 1. Update Profile (using the correct updated_date column)
-      const { error: profileError } = await supabase
-        .from('profiles')
-        .update({ 
-          status: 'active',
-          synced: false,
-          updated_date: new Date().toISOString() 
-        })
-        .eq('email', record.email);
+      const { error } = await supabase.rpc('admin_reactivate_user', {
+        p_attrition_id: record.id,
+        p_email: record.email,
+        p_full_name: record.full_name,
+        p_role: record.role,
+        p_project_id: record.project_id,
+        p_project_type: record.project_type || 'unlabeled',
+        p_geography: record.geography,
+        p_created_by: 'reactivation_flow'
+      });
 
-      if (profileError) throw profileError;
-
-      // 2. Restore Team Assignment
-      // Check your console for 'Assignment Error Details' if this still fails
-      const { error: assignError } = await supabase
-        .from('team_assignments')
-        .insert([{
-          user_id: record.user_id,         // UUID from profiles
-          user_email: record.email,
-          user_name: record.full_name,
-          project_id: record.project_id,   // Must be a valid UUID
-          project_type: record.project_type || 'unlabeled', // REQUIRED by schema
-          geography: record.geography,
-          role: record.role.toLowerCase(), // Ensure lowercase to match ENUM
-          status: 'active',
-          created_by: 'reactivation_flow'
-        }]);
-      
-      if (assignError) {
-          console.error("Assignment Error Details:", assignError);
-          toast.error("Profile updated, but team assignment failed. Check console.");
-      }
-
-      // 3. Remove from Attrition Log
-      const { error: attritionError } = await supabase
-        .from('attrition')
-        .delete()
-        .eq('id', record.id);
-
-      if (attritionError) throw attritionError;
+      if (error) throw error;
 
       toast.success(`${record.full_name} is fully restored.`);
       setRecords(prev => prev.filter(r => r.id !== record.id));
 
     } catch (error) {
-      console.error("Reactivation flow crashed:", error);
-      toast.error("Failed to reactivate user.");
+      console.error("Reactivation failed:", error);
+      toast.error(error.message || "Failed to reactivate user.");
     } finally {
       setReactivatingId(null);
     }

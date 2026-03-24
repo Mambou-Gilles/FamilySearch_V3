@@ -31,11 +31,21 @@ export default function ClientDashboard() {
         supabase.from('project_geography_states').select('*')
       ]);
 
+      if (pRes.error) console.error("Projects Error:", pRes.error.message);
+      if (tRes.error) console.error("tasks Error:", tRes.error.message);
+      if (gsRes.error) console.error("Project-Geography_states:", grRes.error.message);
+
       setProjects(pRes.data || []);
       setTasks(tRes.data || []);
       setGeoStates(gsRes.data || []);
+
+      // If there were any errors, show a single toast instead of crashing
+    if (pRes.error || tRes.error || grRes.error) {
+       toast.warning("Some data failed to load. Check console for details.");
+    }
     } catch (error) {
       console.error("Error loading dashboard data:", error);
+      toast.error("Initialization failed completely.");
     } finally {
       setLoading(false);
     }

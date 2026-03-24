@@ -94,37 +94,78 @@ export default function BulkTaskUpload({ open, onClose, projectId, projectType, 
     a.click();
     URL.revokeObjectURL(url);
   };
-
+  
   function handleFile(e) {
-    const f = e.target.files[0];
-    if (!f) return;
-    setFile(f);
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      const rows = parseCsv(ev.target.result);
-      const errs = [];
-      const urlSeenInCsv = new Set();
-      const mapped = rows.map((row, i) => {
-        const task = { status: "available", project_id: projectId, project_type: projectType, cohort: cohortVal };
-        Object.entries(row).forEach(([k, v]) => {
-          const mapped_key = fieldMap[k];
-          if (mapped_key) {
-            if (["member_connected", "new_person_available"].includes(mapped_key)) {
-              task[mapped_key] = ["yes", "true", "1"].includes(v.toLowerCase());
-            } else task[mapped_key] = v;
+  const f = e.target.files[0];
+  if (!f) return;
+  setFile(f);
+  const reader = new FileReader();
+  reader.onload = (ev) => {
+    const rows = parseCsv(ev.target.result);
+    const errs = [];
+    const urlSeenInCsv = new Set();
+    
+    const mapped = rows.map((row, i) => {
+      const task = { status: "available", project_id: projectId, project_type: projectType, cohort: cohortVal };
+      
+      Object.entries(row).forEach(([k, v]) => {
+        const mapped_key = fieldMap[k];
+        if (mapped_key) {
+          if (["member_connected", "new_person_available"].includes(mapped_key)) {
+            task[mapped_key] = ["yes", "true", "1"].includes(v.toLowerCase().trim()); // Clean boolean strings
+          } else {
+            // APPLY TRIM HERE for geography, url, etc.
+            task[mapped_key] = v ? v.trim() : ""; 
           }
-        });
-        if (!task.url) errs.push(`Row ${i + 2}: missing URL`);
-        else if (urlSeenInCsv.has(task.url)) errs.push(`Row ${i + 2}: Duplicate URL in CSV: ${task.url}`);
-        else urlSeenInCsv.add(task.url);
-        if (!task.geography) errs.push(`Row ${i + 2}: missing Geography`);
-        return task;
+        }
       });
-      setPreview(mapped);
-      setErrors(errs);
-    };
-    reader.readAsText(f);
-  }
+
+      // Validation logic remains the same
+      if (!task.url) errs.push(`Row ${i + 2}: missing URL`);
+      else if (urlSeenInCsv.has(task.url)) errs.push(`Row ${i + 2}: Duplicate URL in CSV: ${task.url}`);
+      else urlSeenInCsv.add(task.url);
+      
+      if (!task.geography) errs.push(`Row ${i + 2}: missing Geography`);
+      
+      return task;
+    });
+
+    setPreview(mapped);
+    setErrors(errs);
+  };
+  reader.readAsText(f);
+}
+
+  // function handleFile(e) {
+  //   const f = e.target.files[0];
+  //   if (!f) return;
+  //   setFile(f);
+  //   const reader = new FileReader();
+  //   reader.onload = (ev) => {
+  //     const rows = parseCsv(ev.target.result);
+  //     const errs = [];
+  //     const urlSeenInCsv = new Set();
+  //     const mapped = rows.map((row, i) => {
+  //       const task = { status: "available", project_id: projectId, project_type: projectType, cohort: cohortVal };
+  //       Object.entries(row).forEach(([k, v]) => {
+  //         const mapped_key = fieldMap[k];
+  //         if (mapped_key) {
+  //           if (["member_connected", "new_person_available"].includes(mapped_key)) {
+  //             task[mapped_key] = ["yes", "true", "1"].includes(v.toLowerCase());
+  //           } else task[mapped_key] = v;
+  //         }
+  //       });
+  //       if (!task.url) errs.push(`Row ${i + 2}: missing URL`);
+  //       else if (urlSeenInCsv.has(task.url)) errs.push(`Row ${i + 2}: Duplicate URL in CSV: ${task.url}`);
+  //       else urlSeenInCsv.add(task.url);
+  //       if (!task.geography) errs.push(`Row ${i + 2}: missing Geography`);
+  //       return task;
+  //     });
+  //     setPreview(mapped);
+  //     setErrors(errs);
+  //   };
+  //   reader.readAsText(f);
+  // }
 
   async function doUpload() {
     const validRows = preview.filter(r => r.url && r.geography);

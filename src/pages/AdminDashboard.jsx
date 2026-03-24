@@ -42,6 +42,18 @@ export default function AdminDashboard() {
     init(); 
   }, []);
 
+  useEffect(() => {
+    const channel = supabase
+      .channel('schema-db-changes')
+      .on('postgres_changes', 
+        { event: 'UPDATE', schema: 'public', table: 'profiles' }, 
+        () => onRefresh() // Trigger a re-fetch whenever a profile changes
+      )
+      .subscribe()
+
+    return () => supabase.removeChannel(channel)
+  }, [])
+
   async function init() {
     setLoading(true);
     try {
@@ -54,17 +66,22 @@ export default function AdminDashboard() {
         supabase.from('tasks').select('*', { count: 'exact', head: true })
       ]);
 
-      if (pRes.error) throw pRes.error;
+      // Check each result individually so one failure doesn't kill the whole app
+      if (pRes.error) console.error("Projects Error:", pRes.error.message);
+      if (aRes.error) console.error("Assignments Error:", aRes.error.message);
+      if (tRes.error) console.error("Tasks Error:", tRes.error.message);
       
       setProjects(pRes.data || []);
       setAssignments(aRes.data || []);
       setTasks(tRes.data || []);
       setProfiles(prRes.data || []);
       setGeoStates(gsRes.data || []);
+      setTotalTaskCount(tCountRes?.count || 0);
 
       // Store the true total count in a new state variable
     setTotalTaskCount(tCountRes.count || 0);
     } catch (err) {
+      console.error("Critical Init Crash:", err);
       toast.error("Initialization failed: " + err.message);
     } finally {
       setLoading(false);

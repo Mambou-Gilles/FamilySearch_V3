@@ -52,8 +52,25 @@ export default function ChatBox({ user }) {
   }, [user, open, selectedContact]);
 
   useEffect(() => {
-    if (open) {
-      setUnread(0);
+    if (open && selectedContact) {
+      // 1. Mark these specific messages as read in the database
+      const markAsRead = async () => {
+        const { error } = await supabase
+          .from('chat_messages')
+          .update({ read: true })
+          .eq('sender_email', selectedContact.user_email)
+          .eq('recipient_email', user.email)
+          .eq('read', false);
+
+        if (!error) {
+          // 2. Update local state so the UI updates instantly
+          setMessages(prev => prev.map(m => 
+            (m.sender_email === selectedContact.user_email) ? { ...m, read: true } : m
+          ));
+        }
+      };
+
+      markAsRead();
       loadMessages();
     }
   }, [open, selectedContact]);
@@ -65,27 +82,40 @@ export default function ChatBox({ user }) {
   // --- Contact & Message Logic ---
   function getAllowedContactRoles(myRole) {
     switch (myRole) {
-      case "admin": return ["admin", "manager", "client", "contributor", "reviewer"];
-      case "manager": return ["manager", "team_lead", "reviewer", "contributor", "admin"];
-      case "team_lead": return ["team_lead", "contributor", "reviewer", "manager"];
-      case "reviewer": return ["reviewer", "contributor", "team_lead"];
-      case "contributor": return ["contributor", "reviewer", "team_lead"];
-      case "client": return ["client", "admin", "manager"];
+      case "admin": return ["manager"]; // Admin -> Managers only
+      case "manager": return ["team_lead", "reviewer", "contributor", "admin"];
+      case "team_lead": return ["manager", "reviewer", "contributor"];
+      case "reviewer": return ["manager", "team_lead", "contributor"];
+      case "contributor": return ["manager", "team_lead", "reviewer"];
+      case "client": return ["admin", "manager"];
       default: return [];
     }
   }
 
   async function loadContacts() {
     try {
-      const { data: assignments } = await supabase
+      // 1. Get MY assignment
+      const { data: myAssigns } = await supabase
         .from('team_assignments')
         .select('*')
         .eq('user_email', user.email)
         .eq('status', 'active');
 
-      if (!assignments?.length) return;
-      const { project_id, geography, role } = assignments[0];
+      if (!myAssigns?.length) return;
+      const myAsgn = myAssigns[0];
+      const { project_id, geography, role, reviewer_email, team_lead_email } = myAsgn;
 
+      // 2. NEW: Fetch anyone who has ever sent ME a message
+      // This handles the "Leader reached out first" rule
+      const { data: recentMessages } = await supabase
+        .from('chat_messages')
+        .select('sender_email')
+        .eq('recipient_email', user.email);
+      
+      // Create a Set of unique emails for fast lookup
+      const whoReachedOut = new Set(recentMessages?.map(m => m.sender_email) || []);
+
+      // 3. Get ALL active people in this project/geo
       const { data: others } = await supabase
         .from('team_assignments')
         .select('*')
@@ -95,11 +125,55 @@ export default function ChatBox({ user }) {
         .neq('user_email', user.email);
 
       const allowedRoles = getAllowedContactRoles(role);
-      const filtered = others?.filter(a => allowedRoles.includes(a.role)) || [];
+
+      // 4. THE FILTER: This is where 'isVisible' logic lives
+      const filtered = others?.filter(person => {
+        // Rule 1: Always hide if role isn't theoretically allowed
+        if (!allowedRoles.includes(person.role)) return false;
+
+        // Rule 2: If this person has messaged me, they are ALWAYS visible
+        if (whoReachedOut.has(person.user_email)) return true;
+
+        // Rule 3: Hierarchy Visibility (The "Standard" Flow)
+        if (role === "contributor") {
+          return (
+            person.user_email === reviewer_email || 
+            person.user_email === team_lead_email || 
+            person.role === "manager"
+          );
+        }
+
+        if (role === "reviewer") {
+          return (
+            person.reviewer_email === user.email || // My assigned contributors
+            person.user_email === team_lead_email || 
+            person.role === "manager"
+          );
+        }
+
+        if (role === "team_lead") {
+          return (
+            person.team_lead_email === user.email || // My assigned team
+            person.role === "manager"
+          );
+        }
+
+        if (role === "manager") return true; // Sees everyone in Project/Geo
+
+        if (role === "admin") return person.role === "manager";
+
+        return false;
+      }) || [];
       
       setContacts(filtered);
-      if (filtered.length && !selectedContact) setSelectedContact(filtered[0]);
-    } catch (e) { console.error(e); }
+      
+      // Auto-select the first person if nothing is selected yet
+      if (filtered.length && !selectedContact) {
+        setSelectedContact(filtered[0]);
+      }
+    } catch (e) { 
+      console.error("Chat Error:", e); 
+    }
   }
 
   async function loadMessages() {
@@ -231,11 +305,28 @@ export default function ChatBox({ user }) {
               </SelectTrigger>
               <SelectContent>
                 {filteredContacts.length > 0 ? (
-                  filteredContacts.map(c => (
-                    <SelectItem key={c.user_email} value={c.user_email}>
-                      {c.user_name} <span className="text-[10px] opacity-50">({c.role})</span>
-                    </SelectItem>
-                  ))
+                  filteredContacts.map(c => {
+                    // Check if there are any unread messages from THIS specific contact
+                    const hasUnread = messages.some(m => 
+                      m.sender_email === c.user_email && 
+                      m.recipient_email === user.email && 
+                      !m.read
+                    );
+
+                    return (
+                      <SelectItem key={c.user_email} value={c.user_email}>
+                        <div className="flex items-center justify-between w-full gap-2">
+                          <span className="flex items-center gap-2">
+                            {c.user_name}
+                            {hasUnread && (
+                              <span className="w-2 h-2 bg-[#25D366] rounded-full animate-pulse" />
+                            )}
+                          </span>
+                          <span className="text-[10px] opacity-50">({c.role})</span>
+                        </div>
+                      </SelectItem>
+                    );
+                  })
                 ) : (
                   <div className="p-2 text-[10px] text-center text-slate-500">No contacts found</div>
                 )}

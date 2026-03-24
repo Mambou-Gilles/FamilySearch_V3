@@ -134,96 +134,92 @@ export default function AdminUsersTab({ profiles, onRefresh }) {
   };
 
   // --- EXISTING LOGIC ---
-  
+
   async function syncToAuth() {
-  const toSync = profiles.filter(p => selected.has(p.id) && !p.synced);
+    // Only target those who haven't been invited or haven't logged in
+    const toInvite = profiles.filter(p => selected.has(p.id) && (!p.synced || !p.last_login));
 
-  if (!toSync.length) {
-    toast.info("All selected users are already synced");
-    return;
-  }
-
-  setSyncing(true);
-  let successCount = 0;
-  let failCount = 0;
-
-  try {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.access_token) {
-      toast.error("Your session has expired. Please log in again.");
+    if (!toInvite.length) {
+      toast.info("No selected users require an invitation.");
       return;
     }
 
-    for (const p of toSync) {
-      try {
-        const { error } = await supabase.functions.invoke("invite-user", {
-          body: {
-            email: p.email,
-            profileId: p.id,
-            fullName: p.full_name,
-            role: p.system_role,
-          },
-        });
+    setSyncing(true);
+    let successCount = 0;
+    let failCount = 0;
 
-        if (error) throw error;
-        successCount++;
-      } catch (err) {
-        console.error(`Sync error for ${p.email}:`, err);
-        failCount++;
+    try {
+      for (const p of toInvite) {
+        try {
+          // We pass the name and role so the Edge Function 
+          // can put them in Auth Metadata for our SQL Trigger
+          const { error } = await supabase.functions.invoke("invite-user", {
+            body: { 
+              email: p.email.toLowerCase(),
+              full_name: p.full_name,
+              role: p.system_role,
+              // Optional: origin is handled by the function, 
+              // but you can override here if needed
+            },
+            headers: {
+              Authorization: `Bearer ${(await supabase.auth.getSession()).data.session?.access_token}`
+            }
+          });
+
+          if (error) throw error;
+          successCount++;
+        } catch (err) {
+          console.error(`Sync error for ${p.email}:`, err);
+          failCount++;
+        }
       }
+
+      if (successCount > 0) toast.success(`Sent ${successCount} invitation(s)`);
+      if (failCount > 0) toast.error(`Failed to invite ${failCount} user(s)`);
+    } finally {
+      setSyncing(false);
+      setSelected(new Set());
+      if (onRefresh) onRefresh();
     }
-
-    if (successCount > 0) toast.success(`Sent ${successCount} invitation(s)`);
-    if (failCount > 0) toast.error(`Failed to invite ${failCount} user(s)`);
-  } finally {
-    setSyncing(false);
-    setSelected(new Set());
-    if (onRefresh) onRefresh();
   }
-}
-
-
+  
   // async function syncToAuth() {
   //   const toSync = profiles.filter(p => selected.has(p.id) && !p.synced);
-    
-  //   if (!toSync.length) { 
-  //     toast.info("All selected users are already synced"); 
-  //     return; 
+
+  //   if (!toSync.length) {
+  //     toast.info("All selected users are already synced");
+  //     return;
   //   }
 
   //   setSyncing(true);
   //   let successCount = 0;
   //   let failCount = 0;
 
-  //   for (const p of toSync) {
-  //     try {
-  //       const { data, error } = await supabase.functions.invoke('invite-user', {
-  //         body: { 
-  //           email: p.email, 
-  //           profileId: p.id,      // Matching 'profileId' from our Edge Function
-  //           fullName: p.full_name, // Pass the name for the Auth metadata
-  //           role: p.system_role   // Crucial: This sets Lead, Client, or Manager
-  //         },
-  //         headers: {
-  //           // The secret handshake that bypasses the 401
-  //           'x-service-key': import.meta.env.VITE_SUPABASE_SERVICE_ROLE_KEY
-  //         }
-  //       });
+  //   try {
+  //     for (const p of toSync) {
+  //       try {
+  //         const { error } = await supabase.functions.invoke("invite-user", {
+  //           body: { email: p.email.toLowerCase() }, // Simplified: Edge Function handles the rest
+  //           headers: {
+  //             apikey: import.meta.env.VITE_SUPABASE_ANON_KEY
+  //           },
+  //         });
 
-  //       if (error) throw error;
-  //       successCount++;
-  //     } catch (err) {
-  //       console.error(`Sync error for ${p.email}:`, err);
-  //       failCount++;
+  //         if (error) throw error;
+  //         successCount++;
+  //       } catch (err) {
+  //         console.error(`Sync error for ${p.email}:`, err);
+  //         failCount++;
+  //       }
   //     }
-  //   }
 
-  //   if (successCount > 0) toast.success(`Sent ${successCount} invitation(s)`);
-  //   if (failCount > 0) toast.error(`Failed to invite ${failCount} user(s)`);
-    
-  //   setSyncing(false);
-  //   setSelected(new Set());
-  //   if (onRefresh) onRefresh();
+  //     if (successCount > 0) toast.success(`Sent ${successCount} invitation(s)`);
+  //     if (failCount > 0) toast.error(`Failed to invite ${failCount} user(s)`);
+  //   } finally {
+  //     setSyncing(false);
+  //     setSelected(new Set());
+  //     if (onRefresh) onRefresh();
+  //   }
   // }
 
   async function refreshSyncStatuses() {
@@ -237,7 +233,6 @@ export default function AdminUsersTab({ profiles, onRefresh }) {
       // Calling the same Edge Function updates the last_login column
       await supabase.functions.invoke('invite-user', {
         body: { email: p.email, profileId: p.id, fullName: p.full_name, role: p.system_role },
-        headers: { 'x-service-key': import.meta.env.VITE_SUPABASE_SERVICE_ROLE_KEY }
       });
     }
 
@@ -262,9 +257,22 @@ export default function AdminUsersTab({ profiles, onRefresh }) {
 
   async function saveEdit() {
     setSavingEdit(true);
-    const { error } = await supabase.from('profiles').update(editForm).eq('id', editingProfile.id);
+
+    // Clean the data: Convert empty strings to null for UUID fields
+    const cleanData = {
+      ...editForm,
+      report_to: editForm.report_to === "" ? null : editForm.report_to,
+      byu_pathway_id: editForm.byu_pathway_id === "" ? null : editForm.byu_pathway_id,
+    };
+
+    const { error } = await supabase
+      .from('profiles')
+      .update(cleanData)
+      .eq('id', editingProfile.id);
+
     if (error) toast.error(error.message);
     else toast.success("Profile updated");
+    
     setSavingEdit(false);
     setEditingProfile(null);
     if (onRefresh) onRefresh();
@@ -272,35 +280,71 @@ export default function AdminUsersTab({ profiles, onRefresh }) {
 
   async function addProfile() {
     setAddingProfile(true);
-    const { error } = await supabase.from('profiles').insert([{ ...addForm, synced: false }]);
+
+    // Clean the data: Convert empty strings to null
+    const cleanAddData = {
+      ...addForm,
+      // If your schema has these as UUIDs/Nullable, ensure they are null, not ""
+      byu_pathway_id: addForm.byu_pathway_id === "" ? null : addForm.byu_pathway_id,
+      synced: false 
+    };
+
+    const { error } = await supabase
+      .from('profiles')
+      .insert([cleanAddData]);
+
     if (error) toast.error(error.message);
     else toast.success("Profile added");
+    
     setAddingProfile(false);
     setAddProfileOpen(false);
+    // Reset form to default
     setAddForm({ full_name: "", email: "", system_role: "manager", byu_pathway_id: "", status: "active" });
     if (onRefresh) onRefresh();
   }
 
+  // async function nudgeUser(p) {
+  //   setSyncing(true);
+  //   try {
+  //     const { error } = await supabase.functions.invoke('invite-user', {
+  //       body: { email: p.email.toLowerCase() },
+  //       headers: {
+  //         apikey: import.meta.env.VITE_SUPABASE_ANON_KEY
+  //       },
+  //     });
+
+  //     if (error) throw error;
+  //     toast.success(`Reminder sent to ${p.email}`);
+  //     if (onRefresh) onRefresh();
+  //   } catch (err) {
+  //     toast.error("Nudge failed: " + err.message);
+  //   } finally {
+  //     setSyncing(false);
+  //   }
+  // }
+
+  // Used for individual "Resend Invite" buttons in the table
   async function nudgeUser(p) {
     setSyncing(true);
     try {
       const { error } = await supabase.functions.invoke('invite-user', {
         body: { 
-          email: p.email, 
-          profileId: p.id, 
-          fullName: p.full_name, 
-          role: p.system_role 
+          email: p.email.toLowerCase(),
+          full_name: p.full_name,
+          role: p.system_role
         },
-        headers: { 'x-service-key': import.meta.env.VITE_SUPABASE_SERVICE_ROLE_KEY }
+        headers: {
+          Authorization: `Bearer ${(await supabase.auth.getSession()).data.session?.access_token}`
+        }
       });
 
       if (error) throw error;
       toast.success(`Reminder sent to ${p.email}`);
-      if (onRefresh) onRefresh();
     } catch (err) {
       toast.error("Nudge failed: " + err.message);
     } finally {
       setSyncing(false);
+      if (onRefresh) onRefresh();
     }
   }
 
@@ -348,7 +392,7 @@ export default function AdminUsersTab({ profiles, onRefresh }) {
             {selected.size > 0 && needsInvite.length > 0 && (
               <Button size="sm" onClick={syncToAuth} disabled={syncing} className="bg-amber-600 hover:bg-amber-700 text-white">
                 <RefreshCw className={`w-4 h-4 mr-1 ${syncing ? "animate-spin" : ""}`} />
-                {syncing ? "Inviting..." : `Nudge/Invite (${needsInvite.length})`}
+                {syncing ? "Inviting..." : `Invite to Sync (${needsInvite.length})`}
               </Button>
             )}
 
@@ -415,22 +459,28 @@ export default function AdminUsersTab({ profiles, onRefresh }) {
                       </span>
                     </td>
                     <td className="p-3 text-center">
-                    {!pr.synced ? (
-                      <span className="text-[10px] text-slate-400 uppercase font-bold tracking-widest">Unsynced</span>
-                    ) : !pr.last_login ? (
-                      <div className="flex flex-col items-center gap-1">
-                        <span className="text-[10px] bg-amber-100 text-amber-700 px-2 py-0.5 rounded font-bold uppercase tracking-tighter animate-pulse">Pending</span>
-                        <button 
-                          onClick={() => nudgeUser(pr)} 
-                          className="text-[9px] text-amber-600 hover:underline font-medium"
-                        >
-                          Resend Invite?
-                        </button>
-                      </div>
-                    ) : (
-                      <span className="text-[10px] bg-green-100 text-green-700 px-2 py-0.5 rounded font-bold uppercase tracking-tighter">Confirmed</span>
-                    )}
-                  </td>
+                      {!pr.synced ? (
+                        <span className="text-[10px] text-slate-400 uppercase font-bold">Not Invited</span>
+                      ) : !pr.last_login ? (
+                        <div className="flex flex-col items-center gap-1">
+                          <span className="text-[10px] bg-amber-100 text-amber-700 px-2 py-0.5 rounded font-bold animate-pulse">
+                            Pending Invite
+                          </span>
+                          <button onClick={() => nudgeUser(pr)} className="text-[9px] text-amber-600 hover:underline">
+                            Resend?
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex flex-col items-center">
+                          <span className="text-[10px] bg-green-100 text-green-700 px-2 py-0.5 rounded font-bold">
+                            Confirmed
+                          </span>
+                          <span className="text-[8px] text-slate-400 mt-0.5">
+                            {new Date(pr.last_login).toLocaleDateString()}
+                          </span>
+                        </div>
+                      )}
+                    </td>
                     {/* <td className="p-3">
                       {pr.synced
                         ? <span className="text-xs text-green-600 font-medium flex items-center gap-1"><CheckCircle2 className="w-3 h-3" />Invite Sent</span>

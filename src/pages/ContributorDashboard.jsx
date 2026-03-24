@@ -51,17 +51,27 @@ export default function ContributorDashboard() {
   }, [user]);
 
   async function init() {
-    setLoading(true);
+    if (!assignment && queue.length === 0) setLoading(true);
     try {
+      if (!user?.id) return;
+
+      // Tighten this query to ensure we get the right role and status
       const { data: assignments, error } = await supabase
         .from('team_assignments')
         .select('*')
         .eq('status', 'active')
         .eq('role', 'contributor')
-        .or(`user_id.eq.${user.id},user_email.eq.${user.email}`);
+        .or(`user_id.eq.${user.id},user_email.eq.${user.email}`)
+        .order('created_date', { ascending: false }); // Get the newest one
 
       if (error) throw error;
-      if (assignments?.length) setAssignment(assignments[0]);
+      
+      if (assignments?.length) {
+        console.log("Active Assignment Found:", assignments[0]); // Debug log
+        setAssignment(assignments[0]);
+      } else {
+        console.warn("No active contributor assignment found for:", user.email);
+      }
       
       await loadTasks(user.email, user.id);
     } catch (err) {
@@ -221,8 +231,16 @@ export default function ContributorDashboard() {
   const pageTasks = activeList.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
   const isCorrectionMode = activeTab === "corrections";
 
-  if (loading) return <div className="flex items-center justify-center h-64 text-slate-500">Loading Dashboard...</div>;
-
+  // Only block the WHOLE dashboard if we are loading AND have no user yet
+  if (loading && !assignment && queue.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center h-[60vh] text-slate-500 animate-pulse">
+        <RefreshCw className="w-8 h-8 animate-spin mb-4 text-sky-600" />
+        <p className="font-medium">Syncing Workspace...</p>
+      </div>
+    );
+  }
+  
   return (
     <div className="min-h-[calc(100vh-56px)] flex flex-col overflow-x-hidden">
       <div className="bg-gradient-to-br from-sky-600 to-sky-900 px-6 py-6 grid grid-cols-1 md:grid-cols-3 items-center gap-4">
